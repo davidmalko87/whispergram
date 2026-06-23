@@ -1,0 +1,163 @@
+{
+  "name": "Sample Chat",
+  "type": "personal_chat",
+  "id": 123456789,
+  "messages": [
+    {
+      "id": 1,
+      "type": "message",
+      "date": "2026-06-20T12:33:01",
+      "from": "Alex",
+      "from_id": "user1",
+      "text": "hey, did you get the files?",
+      "text_entities": [{"type": "plain", "text": "hey, did you get the files?"}]
+    },
+    {
+      "id": 2,
+      "type": "message",
+      "date": "2026-06-20T12:33:40",
+      "from": "You",
+      "from_id": "user2",
+      "text": ["yep, check ", {"type": "link", "text": "https://example.com"}, " thanks"]
+    },
+    {
+      "id": 3,
+      "type": "message",
+      "date": "2026-06-20T12:34:10",
+      "from": "Alex",
+      "from_id": "user1",
+      "media_type": "voice_message",
+      "duration_seconds": 6,
+      "file": "(File not included. Change data exporting settings to download.)",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 4,
+      "type": "message",
+      "date": "2026-06-20T12:35:00",
+      "from": "Alex",
+      "from_id": "user1",
+      "media_type": "video_message",
+      "duration_seconds": 8,
+      "file": "(File not included. Change data exporting settings to download.)",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 5,
+      "type": "message",
+      "date": "2026-06-20T12:35:30",
+      "from": "You",
+      "from_id": "user2",
+      "media_type": "sticker",
+      "sticker_emoji": "OK",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 6,
+      "type": "message",
+      "date": "2026-06-20T12:36:00",
+      "from": "Alex",
+      "from_id": "user1",
+      "photo": "photos/photo_1.jpg",
+      "width": 1280,
+      "height": 720,
+      "text": "the whiteboard from today",
+      "text_entities": [{"type": "plain", "text": "the whiteboard from today"}]
+    },
+    {
+      "id": 7,
+      "type": "message",
+      "date": "2026-06-20T12:36:20",
+      "from": "You",
+      "from_id": "user2",
+      "media_type": "animation",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 8,
+      "type": "message",
+      "date": "2026-06-20T12:36:40",
+      "from": "Alex",
+      "from_id": "user1",
+      "media_type": "video_file",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 9,
+      "type": "message",
+      "date": "2026-06-20T12:37:00",
+      "from": "You",
+      "from_id": "user2",
+      "media_type": "audio_file",
+      "performer": "Band",
+      "title": "Song",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 10,
+      "type": "message",
+      "date": "2026-06-20T12:37:30",
+      "from": "Alex",
+      "from_id": "user1",
+      "file": "files/report.pdf",
+      "file_name": "report.pdf",
+      "text": "see this",
+      "text_entities": [{"type": "plain", "text": "see this"}]
+    },
+    {
+      "id": 11,
+      "type": "message",
+      "date": "2026-06-20T12:38:00",
+      "from": "Alex",
+      "from_id": "user1",
+      "location_information": {"latitude": 50.45, "longitude": 30.52},
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 12,
+      "type": "message",
+      "date": "2026-06-20T12:38:20",
+      "from": "You",
+      "from_id": "user2",
+      "poll": {"question": "lunch?", "total_voters": 2},
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 13,
+      "type": "message",
+      "date": "2026-06-20T12:38:40",
+      "from": "Alex",
+      "from_id": "user1",
+      "contact_information": {"first_name": "Sam", "phone_number": "+10000000000"},
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 14,
+      "type": "service",
+      "date": "2026-06-20T12:39:00",
+      "action": "phone_call",
+      "from": "Alex",
+      "from_id": "user1",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 15,
+      "type": "message",
+      "date": "2026-06-20T12:39:30",
+      "from": "You",
+      "from_id": "user2",
+      "text": "",
+      "text_entities": []
+    }
+  ]
+}

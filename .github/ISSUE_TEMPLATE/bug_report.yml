@@ -1,0 +1,50 @@
+name: Bug report
+description: Something went wrong while transcribing or merging an export
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, and what went wrong? Paste the full console output.
+      placeholder: |
+        Command: python whispergram.py --device cuda
+        Error / unexpected output:
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - "CPU"
+        - "GPU (CUDA)"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, faster-whisper version, GPU model (if any).
+      placeholder: "Windows 11, Python 3.11, faster-whisper 1.2.1, RTX 4070"
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: >
+        Please do NOT paste any private chat content, transcripts, or real names.
+        Describe the message *type* that triggered the issue instead (voice note, sticker, etc.).
+    validations:
+      required: false

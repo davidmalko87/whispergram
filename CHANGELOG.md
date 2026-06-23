@@ -1,0 +1,53 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [0.1.0] - 2026-06-23
+
+Initial public release of **whispergram**. Hardened from a single working script into a tested,
+packaged tool, with every fix below verified against a real 770-message Telegram export.
+
+### Added
+- **Transcribe Telegram voice notes and round video notes** locally and offline with
+  faster-whisper, merged into the text chat as one chronological, sender/timestamp-tagged file.
+- **`--dry-run`** — map the whole chat *without* loading a model or transcribing. Lets you
+  preview the merge instantly and verify the mapping with no GPU and no model download.
+- **Media markers** — stickers, photos, animations, documents, music, **locations, polls and
+  contacts** now appear as `(sticker ...)`, `(photo)`, `(file: name.pdf)`, `(location)`, etc.,
+  instead of vanishing from the timeline. Disable with `--no-media-markers`.
+- **`--audio-files`** — opt in to also transcribe `audio_file` messages (music / long memos);
+  off by default so songs are not run through speech recognition.
+- **`--version`** flag, and a `whispergram` console entry point (installable via pip).
+- **Offline `pytest` suite** (44 tests) covering text reconstruction across all three Telegram
+  text shapes, missing-media detection, every media marker, chat interleaving, caption suffixes,
+  the audio-file opt-in, JSON discovery tie-breaks, and the full `main()` CLI path. Runs on the
+  Python 3.9–3.13 CI matrix with **no** transcription deps.
+- **CI** (ruff + pytest) and a tag-triggered **PyPI publish** workflow (trusted publishing) that
+  refuses to publish if the git tag and `__version__` disagree.
+
+### Fixed
+- **Whole classes of media were silently dropped** — 88 of 770 messages in a real export
+  (stickers, photos, animations with no caption) produced no output line at all, and locations,
+  polls and contacts would have been dropped too. They are now represented by a marker, so nothing
+  content-bearing disappears.
+- **`extract_text` could crash on a `null` text value or a non-dict entity** — text
+  reconstruction is now fully defensive: a `null` run or a malformed entity contributes `""`
+  instead of aborting the whole file. Covers `text_entities` (preferred), a plain `str`, and a
+  mixed `list` of strings + entity dicts.
+- **The module could not be imported without faster-whisper installed** — the transcription
+  dependency is now imported lazily, so the mapping logic (and the tests) load with zero heavy
+  deps, and `--dry-run` works on a machine with no GPU and no model.
+- **`find_json` could pick the wrong file** — it now prefers an exact `result.json` before any
+  substring match.
+- Not-exported documents are now flagged `[not exported]` in their marker; output ends with a
+  trailing newline; the export folder is validated before work; console output is forced to UTF-8
+  so non-ASCII filenames never crash the run on Windows.
+
+### Changed
+- Refactored the transcription loop out of `main()` into pure, injectable functions
+  (`build_transcript`, `extract_text`, `media_marker`, `is_missing_media`) for testability.

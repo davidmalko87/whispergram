@@ -1,0 +1,48 @@
+# --- Private chat data: NEVER commit ---
+ChatExport_*/
+DataExport_*/
+*.json
+*.ogg
+*.opus
+*.mp4
+*.mov
+*.wav
+*.m4a
+merged_chat.md
+merged_*.md
+*_chat.md
+*.transcript.md
+voice_messages/
+video_files/
+stickers/
+photos/
+files/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# --- Whisper / model caches (large) ---
+*.bin
+.cache/
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg-info/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Allow synthetic test fixtures (no real data) ---
+# These re-include the committed sample export that the broad rules above would ignore.
+!tests/fixtures/
+!tests/fixtures/**
