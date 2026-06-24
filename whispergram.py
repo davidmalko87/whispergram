@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {

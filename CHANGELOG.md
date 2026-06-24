@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.1] - 2026-06-25
+
+### Changed
+- Documentation and package metadata now lead with **photo support**: the README hero and
+  example-output blocks show described + OCR'd photos (`(photo, described): <scene> | text: ...`),
+  the tagline and PyPI description cover OCR and the local vision model (`--describe`) alongside
+  voice/video, and `ocr` / `image-captioning` / `screenshot` keywords were added. No code changes.
+
+---
+
 ## [0.3.0] - 2026-06-25
 
 ### Added
