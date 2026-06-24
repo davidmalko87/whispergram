@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.2] - 2026-06-25
+
+### Added
+- **`--offline`** — forces the model libraries to use only already-downloaded weights and make
+  **zero network calls** (`HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE`). With telemetry now off by
+  default, this gives a provable "no network, no telemetry" run once the models are cached.
+- **`--describe-model`** — pick the BLIP caption model, e.g.
+  `Salesforce/blip-image-captioning-base` for a faster/lighter run.
+
+### Changed
+- **Hugging Face telemetry is disabled by default** (`HF_HUB_DISABLE_TELEMETRY=1`) — the libraries
+  no longer send anonymized usage pings (model/library names + versions; never your content).
+- **Default caption model is now BLIP-large** (`Salesforce/blip-image-captioning-large`) for
+  noticeably richer captions than BLIP-base. Verified end-to-end on torch 2.12 + transformers 5.12.
+- Photo captioning now **degrades gracefully** if the model can't be loaded (e.g. `--offline` with
+  nothing cached): photos fall back to a `(photo)` marker instead of crashing the run.
+
+---
+
 ## [0.4.1] - 2026-06-25
 
 ### Fixed

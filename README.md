@@ -224,6 +224,7 @@ whispergram --audio-files                         # also transcribe music/long a
 whispergram --video-files                         # also transcribe regular videos' audio
 whispergram --ocr --ocr-lang ukr+rus+eng          # read text from photos (local Tesseract)
 whispergram --no-describe                         # skip photo scene captions
+whispergram --offline                             # zero network calls (use cached models only)
 whispergram --out result.md                       # custom output path
 ```
 
@@ -238,6 +239,8 @@ whispergram --out result.md                       # custom output path
 | `--ocr` | off | extract text from photos with local Tesseract OCR |
 | `--ocr-lang` | `eng` | Tesseract language(s), e.g. `ukr+rus+eng` |
 | `--no-describe` | off | skip photo scene captions (on by default when `[describe]` is installed) |
+| `--describe-model` | `blip-large` | BLIP caption model id; use `...-base` for faster/lighter |
+| `--offline` | off | use only cached models; make zero network calls |
 | `--no-media-markers` | off | omit `(sticker)` / `(photo)` / `(file)` markers |
 | `--dry-run` | off | map the chat without loading a model or transcribing |
 | `--setup-cuda-windows` | — | copy CUDA DLLs next to ctranslate2, then exit (Windows GPU fix) |
@@ -273,9 +276,11 @@ Export the chat from Telegram Desktop as JSON (with voice messages), then run `w
 export folder. Every voice note is transcribed with Whisper and merged into the text chat.
 
 **Is it private / offline? Does my audio leave my machine?**
-Yes, it is offline. Transcription runs locally with faster-whisper and needs no account or API key.
-The tool makes no network calls with your data; faster-whisper downloads the speech model **once**
-on first run, then works fully offline. Your chat audio and transcripts never leave your machine.
+Yes. Transcription, captioning and OCR run locally and need no account or API key. The tool makes no
+network calls **with your data** — your chat audio, photos and transcripts never leave your machine.
+The only network use is a **one-time download of the model weights** (public files) from Hugging
+Face; usage telemetry is **off by default**, and `--offline` forces cache-only with **zero** network
+calls once the models are downloaded.
 
 **Do I need a GPU?**
 No. It runs on CPU (`--device cpu`); use `--model large-v3-turbo` for speed. A CUDA GPU is faster.
@@ -292,8 +297,9 @@ Yes — `--ocr` runs local Tesseract over photos and drops the extracted text in
 Yes, and it's **automatic**: once you `pip install whispergram[describe]`, photos are captioned by a
 small local model (BLIP via transformers — uses your GPU if you have one, else CPU)
 with no flag needed. It composes with `--ocr` to give both the scene and the in-image text. Captions
-are short, English, and best-effort. Pass `--no-describe` to turn it off. The ~1 GB model downloads
-once on the first photo, then stays offline.
+are a short, English, best-effort gist. Pass `--no-describe` to turn it off, or `--describe-model
+Salesforce/blip-image-captioning-base` for a faster/lighter model. The BLIP-large model (~1.9 GB)
+downloads once on the first photo, then stays offline.
 
 **Which languages work?**
 Any language Whisper supports. `large-v3` handles Ukrainian and Russian well; use `--lang uk` (or
@@ -338,8 +344,10 @@ whispergram/
 This tool processes **private conversations**, and the transcripts it produces are just as
 sensitive as the audio. Two rules:
 
-- **Nothing leaves your machine.** Transcription is fully local; the tool makes no network calls
-  with your data and needs no credentials.
+- **Nothing leaves your machine.** Transcription, captioning and OCR are fully local; the tool makes
+  no network calls with your data and needs no credentials. The only network use is a one-time
+  download of public model weights from Hugging Face — telemetry is off by default, and `--offline`
+  guarantees zero network calls once the models are cached.
 - **Never commit your exports or transcripts.** The included `.gitignore` blocks chat data
   (`*.json`, audio files, `merged_chat.md`, `ChatExport_*/`) by default — keep it. Build your repo
   in a folder **separate** from any export, keep any `--out` path **inside** the export folder, and
@@ -355,7 +363,7 @@ sensitive as the audio. Two rules:
 - [`faster-whisper`](https://pypi.org/project/faster-whisper/) >= 1.0 (`pip install -r requirements.txt`)
 - For NVIDIA GPU on Windows: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `ctranslate2>=4.5`
 - For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install whispergram[ocr]`
-- For photo descriptions (optional): `pip install whispergram[describe]` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1 GB BLIP model downloads once on the first photo, then runs offline. `--no-describe` turns it off
+- For photo descriptions (optional): `pip install whispergram[describe]` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1.9 GB BLIP-large model downloads once on the first photo, then runs offline. Use `--describe-model Salesforce/blip-image-captioning-base` for a lighter model, or `--no-describe` to turn it off
 
 > The test suite needs none of the above — only `ruff` and `pytest`.
 

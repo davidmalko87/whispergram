@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -302,10 +302,23 @@ def _setup_cuda_windows() -> None:
     print("Now run the script normally with --device cuda.")
 
 
+def _configure_hf_env(offline: bool) -> None:
+    """Privacy defaults for the Hugging Face libraries the models load through.
+
+    Disables anonymized usage telemetry (model/library names + versions - never your content) by
+    default. With *offline*, forces the libraries to use only already-downloaded models and make
+    zero network calls. Call before any model is loaded.
+    """
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    if offline:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+
 def load_model(model_name: str, device: str):
     """Load a faster-whisper model, falling back from CUDA to CPU on any load failure."""
     _register_cuda_dll_dirs()
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     try:
         from faster_whisper import WhisperModel
     except ImportError:
@@ -371,18 +384,20 @@ def make_ocr(lang: str) -> Describer:
 
 
 def make_describer(
-    model_id: str = "Salesforce/blip-image-captioning-base",
+    model_id: str = "Salesforce/blip-image-captioning-large",
 ) -> Optional[Describer]:
     """Build a caching scene-caption ``describe(image_path) -> text`` closure, or ``None``.
 
     Runs a small local image-captioning model (BLIP, BSD-3) via transformers, loaded through its
     dedicated ``BlipProcessor`` / ``BlipForConditionalGeneration`` classes (the Auto-classes do
-    not resolve cleanly on transformers 5.x). Weights (~1 GB) download once from Hugging Face then
-    run offline - on the GPU if available, else the CPU. Captioning is on by default; if the
-    optional deps are not installed this returns ``None`` (photos fall back to a plain ``(photo)``
-    marker) instead of failing the run. The model loads lazily on the first photo, so a photo-less
-    chat never triggers the download. Captions are a short, English, best-effort gist of the scene,
-    never literal content (use --ocr for the text inside an image). Enable with
+    not resolve cleanly on transformers 5.x). Weights download once from Hugging Face then run
+    offline - on the GPU if available, else the CPU. Captioning is on by default; if the optional
+    deps are missing this returns ``None``, and if the model can't be loaded (e.g. ``--offline``
+    with nothing cached) photos degrade to a plain ``(photo)`` marker - neither fails the run. The
+    model loads lazily on the first photo, so a photo-less chat never triggers the download.
+    Captions are a short, English, best-effort gist of the scene, never literal content (use --ocr
+    for the text inside an image). Default is BLIP-large; pass a lighter id such as
+    ``Salesforce/blip-image-captioning-base`` via ``--describe-model`` for speed. Enable with
     ``pip install whispergram[describe]``.
     """
     try:
@@ -402,13 +417,21 @@ def make_describer(
     def describe(path: str) -> str:
         if path in cache:
             return cache[path]
-        if not state:  # lazy one-time load on the first photo
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"Describer: {model_id} on {device} (model loads/downloads on first photo)")
-            model = BlipForConditionalGeneration.from_pretrained(model_id)
-            state["proc"] = BlipProcessor.from_pretrained(model_id)
-            state["model"] = model.to(device).eval()
-            state["device"] = device
+        if state.get("disabled"):
+            return ""
+        if "model" not in state:  # lazy one-time load on the first photo
+            try:
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                print(f"Describer: {model_id} on {device} (model loads/downloads on first photo)")
+                model = BlipForConditionalGeneration.from_pretrained(model_id)
+                state["proc"] = BlipProcessor.from_pretrained(model_id)
+                state["model"] = model.to(device).eval()
+                state["device"] = device
+            except Exception as exc:
+                print(f"Note: photo captioning disabled ({type(exc).__name__}); "
+                      "photos shown as plain markers.")
+                state["disabled"] = True
+                return ""
         print(f"  describing {os.path.basename(path)} ...")
         try:
             image = Image.open(path).convert("RGB")
@@ -454,6 +477,11 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     ap.add_argument("--no-describe", action="store_true",
                     help="skip photo scene captions (no model load/download); on by default "
                          "when the [describe] extra is installed")
+    ap.add_argument("--describe-model", default="Salesforce/blip-image-captioning-large",
+                    help="BLIP captioning model id (default: blip-large; "
+                         "use ...-base for faster/lighter)")
+    ap.add_argument("--offline", action="store_true",
+                    help="use only already-downloaded models and make zero network calls")
     ap.add_argument("--no-media-markers", action="store_true",
                     help="omit (sticker)/(photo)/(file) markers for non-voice media")
     ap.add_argument("--dry-run", action="store_true",
@@ -480,6 +508,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.isdir(args.export_dir):
         sys.exit(f"Export folder not found: {os.path.abspath(args.export_dir)}")
 
+    _configure_hf_env(args.offline)
     json_path = find_json(args.export_dir)
     out_path = args.out or os.path.join(args.export_dir, "merged_chat.md")
     print(f"Export: {os.path.basename(json_path)}")
@@ -503,7 +532,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         model = load_model(args.model, args.device)
         transcribe = make_transcriber(model, args.lang)
         if not args.no_describe:
-            describer = make_describer()  # None (with a hint) if the extra isn't installed
+            # None (with a hint) if the [describe] extra isn't installed
+            describer = make_describer(args.describe_model)
         if args.ocr:
             ocr = make_ocr(args.ocr_lang)
 

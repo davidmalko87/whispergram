@@ -493,6 +493,21 @@ def test_main_describes_photos_by_default(tmp_path):
     assert out.read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] A (photo)"
 
 
+def test_configure_hf_env(monkeypatch):
+    """Telemetry is disabled by default; --offline forces cache-only, zero-network env vars."""
+    from whispergram import _configure_hf_env
+    for var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_HUB_DISABLE_TELEMETRY"):
+        monkeypatch.delenv(var, raising=False)
+
+    _configure_hf_env(offline=False)
+    assert os.environ["HF_HUB_DISABLE_TELEMETRY"] == "1"
+    assert "HF_HUB_OFFLINE" not in os.environ
+
+    _configure_hf_env(offline=True)
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
+
+
 # --- metadata -------------------------------------------------------------------------
 def test_version_is_semver():
     parts = __version__.split(".")
