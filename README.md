@@ -89,12 +89,28 @@ You also need **ffmpeg** on your PATH:
 
 ### 2. Export your chat from Telegram
 
-Telegram **Desktop** → open the chat → ⋮ menu → **Export chat history**:
+Telegram **Desktop** → open the chat → ⋮ menu → **Export chat history**. In the dialog:
 
-- Format: **JSON**
-- Tick **Voice messages** (and **Video messages** for round notes)
+- **Format: JSON** (required — whispergram reads the JSON export, not the HTML one).
+- Tick the media you want whispergram to use:
 
-You get a folder with a `.json` file plus `voice_messages/` and `video_files/` subfolders.
+| Export option | Tick it? | What whispergram does with it |
+|---|---|---|
+| **Voice messages** | ✅ | Transcribed — the core feature |
+| **Video messages** | ✅ | Round video notes — transcribed |
+| **Photos** | ✅ for captions / `--ocr` | Scene-captioned and/or OCR'd; without it, photos show as a plain `(photo)` |
+| **Videos** | optional, for `--video-files` | Regular videos — their audio is transcribed |
+| **Stickers** | ⬜ not needed | Shown as `(sticker 😅)` from the JSON metadata — the file itself isn't used |
+| **GIFs** | ⬜ not needed | Shown as `(animation)` from the JSON metadata |
+| **Files** | ⬜ not needed | Shown as `(file: report.pdf)` from the JSON metadata |
+
+> **⚠️ Drag the "Size limit" slider up.** It defaults to **8 MB**, and any file larger than that is
+> **not** downloaded — those messages come out as `[not exported]`. Voice notes are tiny, but video
+> notes, videos, and hi-res photos routinely exceed 8 MB, so raise the slider (toward the max) to be
+> sure your media actually lands in the export. *(This is the usual reason notes show as `[not exported]`.)*
+
+You get a folder with a `.json` file plus `voice_messages/`, `video_files/`, `photos/` … subfolders
+for whatever you ticked.
 
 ### 3. Run
 
