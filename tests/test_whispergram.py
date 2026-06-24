@@ -14,6 +14,7 @@ import pytest
 
 from whispergram import (
     __version__,
+    _photo_reader,
     build_transcript,
     extract_text,
     find_json,
@@ -379,6 +380,47 @@ def test_photo_unchanged_without_describer():
                  "text_entities": [{"type": "plain", "text": "hi"}]}]
     lines, _ = build_transcript(messages, ".", fake_transcribe)
     assert lines == ["[2026-06-20 10:00] A (photo): hi"]
+
+
+# --- _photo_reader: composing scene-describe (--describe) with OCR (--ocr) -------------
+def test_photo_reader_describe_only():
+    fn, label = _photo_reader(lambda p: "a cat on a sofa", None)
+    assert label == "described"
+    assert fn("x.jpg") == "a cat on a sofa"
+
+
+def test_photo_reader_ocr_only():
+    fn, label = _photo_reader(None, lambda p: "INVOICE 42")
+    assert label == "text"
+    assert fn("x.jpg") == "INVOICE 42"
+
+
+def test_photo_reader_both_merges():
+    fn, label = _photo_reader(lambda p: "a receipt", lambda p: "Total 9.99")
+    assert label == "described"
+    assert fn("x.jpg") == "a receipt | text: Total 9.99"
+
+
+def test_photo_reader_both_with_one_side_empty():
+    only_text, _ = _photo_reader(lambda p: "   ", lambda p: "Total 9.99")
+    assert only_text("x.jpg") == "text: Total 9.99"
+    only_caption, _ = _photo_reader(lambda p: "a receipt", lambda p: "   ")
+    assert only_caption("x.jpg") == "a receipt"
+
+
+def test_photo_reader_neither():
+    fn, label = _photo_reader(None, None)
+    assert fn is None and label == "text"
+
+
+def test_build_transcript_describe_plus_ocr(tmp_path):
+    (tmp_path / "p.jpg").write_bytes(b"x")
+    describe, label = _photo_reader(lambda p: "a whiteboard", lambda p: "Sprint")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A", "photo": "p.jpg"}]
+    lines, stats = build_transcript(
+        messages, str(tmp_path), fake_transcribe, describe=describe, photo_label=label)
+    assert lines == ["[2026-06-20 10:00] A (photo, described): a whiteboard | text: Sprint"]
+    assert stats["described"] == 1
 
 
 # --- find_json ------------------------------------------------------------------------

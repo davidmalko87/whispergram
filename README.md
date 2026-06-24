@@ -53,7 +53,8 @@ search, or feed to a model.
 | **Auto-detect** | Finds the export JSON (any filename) and the language per file |
 | **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
 | **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
-| **Tested** | 52 offline tests on the Python 3.9–3.13 CI matrix |
+| **Photo descriptions** | `--describe` captions a photo's *scene* with a local vision model (no torch, no cloud) |
+| **Tested** | 58 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -142,6 +143,8 @@ The result is `merged_chat.md` in the export folder.
 | Music / audio file | `[time] sender (audio: Artist - Title)` — transcribe with `--audio-files` |
 | Regular video file | `[time] sender (video)` — transcribe the audio with `--video-files` |
 | Photo **with `--ocr`** | `[time] sender (photo, text): <text found in the image>` |
+| Photo **with `--describe`** | `[time] sender (photo, described): <a caption of the scene>` |
+| Photo **with both** | `[time] sender (photo, described): <scene> \| text: <in-image text>` |
 
 Markers can be turned off with `--no-media-markers` (voice/video notes are always transcribed).
 
@@ -183,7 +186,7 @@ of effort in the tool:
 | Round video notes | Audio only, if downloaded | Telegram often excludes the binary; those show `[not exported]` |
 | Music / `audio_file` | Off by default | Opt in with `--audio-files`; songs are otherwise not run through ASR |
 | Photo OCR | Text-in-image only | `--ocr` reads visible text (great for screenshots), not a description of the scene; needs Tesseract + language packs |
-| Photo descriptions | Roadmap | A local vision model (`--describe`) to caption a photo's *content/meaning* is planned — kept local to preserve the no-cloud promise |
+| Photo descriptions | Best-effort, local | `--describe` captions a photo's scene with a small local model (SmolVLM2) — short, English, and a *guess*, not literal fact; opt-in `whispergram[describe]` |
 | Speaker labels | Sender only | Each note is attributed to its Telegram sender; no in-audio diarization |
 | Timestamps | Minute resolution | Telegram exports `YYYY-MM-DDThh:mm`; seconds are not shown |
 | Reactions / edits / replies | Not represented | The merged file is a clean reading transcript, not a full forensic dump |
@@ -200,6 +203,7 @@ whispergram --dry-run                             # preview the merge, no transc
 whispergram --audio-files                         # also transcribe music/long audio files
 whispergram --video-files                         # also transcribe regular videos' audio
 whispergram --ocr --ocr-lang ukr+rus+eng          # read text from photos (local Tesseract)
+whispergram --describe                            # caption a photo's scene (local vision model)
 whispergram --out result.md                       # custom output path
 ```
 
@@ -213,6 +217,7 @@ whispergram --out result.md                       # custom output path
 | `--video-files` | off | also transcribe regular video files' audio track |
 | `--ocr` | off | extract text from photos with local Tesseract OCR |
 | `--ocr-lang` | `eng` | Tesseract language(s), e.g. `ukr+rus+eng` |
+| `--describe` | off | caption a photo's scene with a local vision model |
 | `--no-media-markers` | off | omit `(sticker)` / `(photo)` / `(file)` markers |
 | `--dry-run` | off | map the chat without loading a model or transcribing |
 | `--setup-cuda-windows` | — | copy CUDA DLLs next to ctranslate2, then exit (Windows GPU fix) |
@@ -261,8 +266,13 @@ video files are transcribed too with `--video-files`.
 
 **Can it read text from photos / screenshots?**
 Yes — `--ocr` runs local Tesseract over photos and drops the extracted text inline as
-`(photo, text): ...`. It reads text *in* the image (ideal for screenshots); describing a photo's
-scene is on the roadmap via a local vision model. Everything stays offline.
+`(photo, text): ...` (ideal for screenshots).
+
+**Can it describe what's *in* a photo, not just the text?**
+Yes — `--describe` captions the scene ("two people at a whiteboard") with a small local vision
+model (SmolVLM2 via llama.cpp — no torch, no cloud). It composes with `--ocr` to give both the
+scene and the in-image text. Captions are short, English, and best-effort. Install with
+`pip install whispergram[describe]`; everything stays offline (the model downloads once).
 
 **Which languages work?**
 Any language Whisper supports. `large-v3` handles Ukrainian and Russian well; use `--lang uk` (or
@@ -294,7 +304,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 52 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 58 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)
@@ -324,6 +334,7 @@ sensitive as the audio. Two rules:
 - [`faster-whisper`](https://pypi.org/project/faster-whisper/) >= 1.0 (`pip install -r requirements.txt`)
 - For NVIDIA GPU on Windows: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `ctranslate2>=4.5`
 - For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install whispergram[ocr]`
+- For `--describe` (optional): `pip install whispergram[describe]` (llama-cpp-python + huggingface-hub); the ~500 MB SmolVLM2 model downloads once on first run, then runs offline
 
 > The test suite needs none of the above — only `ruff` and `pytest`.
 
