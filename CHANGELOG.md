@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0] - 2026-06-25
+
+### Added
+- **`--video-files`** — also transcribe the audio track of regular video files (not just round
+  `video_message` notes), through the same faster-whisper path. Off by default; silent GIFs
+  (`animation`) stay markers.
+- **`--ocr`** (with **`--ocr-lang`**) — extract text from photos with **local Tesseract OCR** and
+  place it inline as `(photo, text): ...`. Fully offline; needs the Tesseract binary plus
+  `pip install whispergram[ocr]` (`--ocr-lang ukr+rus+eng` for Cyrillic screenshots). Off by
+  default; a photo with no readable text falls back to the plain `(photo)` marker, and missing
+  photos are never sent to the OCR engine.
+- Injectable `describe(path)` photo describer mirroring the transcriber, so the new logic is
+  exercised offline with a fake in the test suite (now 52 tests).
+
+### Changed
+- `build_transcript` gained `video_files`, `describe`, and `photo_label` keyword arguments; all
+  default to the previous behaviour, so existing usage is unchanged.
+
+---
+
 ## [0.1.0] - 2026-06-23
 
 Initial public release of **whispergram**. Hardened from a single working script into a tested,

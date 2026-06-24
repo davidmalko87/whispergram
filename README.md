@@ -51,7 +51,9 @@ search, or feed to a model.
 | **Dry-run** | Preview the full merge with `--dry-run` — no model download, no GPU, instant |
 | **GPU or CPU** | CUDA with automatic CPU fallback; a one-command Windows CUDA fix is built in |
 | **Auto-detect** | Finds the export JSON (any filename) and the language per file |
-| **Tested** | 44 offline tests on the Python 3.9–3.13 CI matrix |
+| **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
+| **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
+| **Tested** | 52 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -138,6 +140,8 @@ The result is `merged_chat.md` in the export folder.
 | Document | `[time] sender (file: report.pdf): caption` |
 | Location / poll / contact | `[time] sender (location)` · `(poll)` · `(contact)` |
 | Music / audio file | `[time] sender (audio: Artist - Title)` — transcribe with `--audio-files` |
+| Regular video file | `[time] sender (video)` — transcribe the audio with `--video-files` |
+| Photo **with `--ocr`** | `[time] sender (photo, text): <text found in the image>` |
 
 Markers can be turned off with `--no-media-markers` (voice/video notes are always transcribed).
 
@@ -178,6 +182,8 @@ of effort in the tool:
 |---|---|---|
 | Round video notes | Audio only, if downloaded | Telegram often excludes the binary; those show `[not exported]` |
 | Music / `audio_file` | Off by default | Opt in with `--audio-files`; songs are otherwise not run through ASR |
+| Photo OCR | Text-in-image only | `--ocr` reads visible text (great for screenshots), not a description of the scene; needs Tesseract + language packs |
+| Photo descriptions | Roadmap | A local vision model (`--describe`) to caption a photo's *content/meaning* is planned — kept local to preserve the no-cloud promise |
 | Speaker labels | Sender only | Each note is attributed to its Telegram sender; no in-audio diarization |
 | Timestamps | Minute resolution | Telegram exports `YYYY-MM-DDThh:mm`; seconds are not shown |
 | Reactions / edits / replies | Not represented | The merged file is a clean reading transcript, not a full forensic dump |
@@ -192,6 +198,8 @@ whispergram --device cpu --model large-v3-turbo   # no GPU, fast
 whispergram --lang uk                             # force a language
 whispergram --dry-run                             # preview the merge, no transcription
 whispergram --audio-files                         # also transcribe music/long audio files
+whispergram --video-files                         # also transcribe regular videos' audio
+whispergram --ocr --ocr-lang ukr+rus+eng          # read text from photos (local Tesseract)
 whispergram --out result.md                       # custom output path
 ```
 
@@ -202,6 +210,9 @@ whispergram --out result.md                       # custom output path
 | `--lang` | auto | force a code like `uk`, `ru`, `en` if auto-detect mislabels |
 | `--out` | `merged_chat.md` | output file |
 | `--audio-files` | off | also transcribe `audio_file` messages (music, long memos) |
+| `--video-files` | off | also transcribe regular video files' audio track |
+| `--ocr` | off | extract text from photos with local Tesseract OCR |
+| `--ocr-lang` | `eng` | Tesseract language(s), e.g. `ukr+rus+eng` |
 | `--no-media-markers` | off | omit `(sticker)` / `(photo)` / `(file)` markers |
 | `--dry-run` | off | map the chat without loading a model or transcribing |
 | `--setup-cuda-windows` | — | copy CUDA DLLs next to ctranslate2, then exit (Windows GPU fix) |
@@ -245,7 +256,13 @@ on first run, then works fully offline. Your chat audio and transcripts never le
 No. It runs on CPU (`--device cpu`); use `--model large-v3-turbo` for speed. A CUDA GPU is faster.
 
 **Does it handle round video messages / video notes?**
-Yes — round `video_message` notes are transcribed from their audio, just like voice notes.
+Yes — round `video_message` notes are transcribed from their audio, just like voice notes. Regular
+video files are transcribed too with `--video-files`.
+
+**Can it read text from photos / screenshots?**
+Yes — `--ocr` runs local Tesseract over photos and drops the extracted text inline as
+`(photo, text): ...`. It reads text *in* the image (ideal for screenshots); describing a photo's
+scene is on the roadmap via a local vision model. Everything stays offline.
 
 **Which languages work?**
 Any language Whisper supports. `large-v3` handles Ukrainian and Russian well; use `--lang uk` (or
@@ -277,7 +294,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 44 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 52 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)
@@ -306,6 +323,7 @@ sensitive as the audio. Two rules:
 - [ffmpeg](https://ffmpeg.org/) on your PATH
 - [`faster-whisper`](https://pypi.org/project/faster-whisper/) >= 1.0 (`pip install -r requirements.txt`)
 - For NVIDIA GPU on Windows: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `ctranslate2>=4.5`
+- For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install whispergram[ocr]`
 
 > The test suite needs none of the above — only `ruff` and `pytest`.
 

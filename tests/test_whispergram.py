@@ -49,6 +49,11 @@ def fake_transcribe(path):
     return f"<transcript of {os.path.basename(path)}>"
 
 
+def fake_describe(path):
+    """Stand-in for OCR: deterministic, returns synthetic 'image text'."""
+    return f"<ocr of {os.path.basename(path)}>"
+
+
 # --- extract_text: the three Telegram text shapes, defensively ------------------------
 def test_extract_text_from_entities():
     msg = {"text_entities": [{"type": "plain", "text": "hello "},
@@ -296,6 +301,84 @@ def test_audio_files_opt_in(tmp_path):
     opted, stats = build_transcript(messages, str(tmp_path), fake_transcribe, audio_files=True)
     assert opted == ["[2026-06-20 10:00] A (audio 200s): <transcript of song.mp3>"]
     assert stats["transcribed"] == 1
+
+
+# --- video files (regular videos, not round video notes) ------------------------------
+def test_video_file_marker_by_default():
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "media_type": "video_file"}]
+    lines, _ = build_transcript(messages, ".", fake_transcribe)
+    assert lines == ["[2026-06-20 10:00] A (video)"]
+
+
+def test_video_file_transcribed_when_enabled(tmp_path):
+    (tmp_path / "v.mp4").write_bytes(b"x")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "media_type": "video_file", "duration_seconds": 12, "file": "v.mp4"}]
+    lines, stats = build_transcript(messages, str(tmp_path), fake_transcribe, video_files=True)
+    assert lines == ["[2026-06-20 10:00] A (video 12s): <transcript of v.mp4>"]
+    assert stats["transcribed"] == 1
+
+
+def test_video_files_flag_does_not_pull_in_audio_files(tmp_path):
+    """--video-files must not also transcribe audio_file (each flag is independent)."""
+    (tmp_path / "song.mp3").write_bytes(b"x")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "media_type": "audio_file", "performer": "B", "title": "S", "file": "song.mp3"}]
+    lines, _ = build_transcript(messages, str(tmp_path), fake_transcribe, video_files=True)
+    assert lines == ["[2026-06-20 10:00] A (audio: B - S)"]
+
+
+# --- photo OCR (injected describer) ---------------------------------------------------
+def test_photo_ocr_when_enabled(tmp_path):
+    (tmp_path / "photos").mkdir()
+    (tmp_path / "photos" / "p.jpg").write_bytes(b"x")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "photo": "photos/p.jpg"}]
+    lines, stats = build_transcript(
+        messages, str(tmp_path), fake_transcribe, describe=fake_describe)
+    assert lines == ["[2026-06-20 10:00] A (photo, text): <ocr of p.jpg>"]
+    assert stats["described"] == 1
+
+
+def test_photo_ocr_with_caption(tmp_path):
+    (tmp_path / "p.jpg").write_bytes(b"x")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A", "photo": "p.jpg",
+                 "text_entities": [{"type": "plain", "text": "look"}]}]
+    lines, _ = build_transcript(messages, str(tmp_path), fake_transcribe, describe=fake_describe)
+    assert lines == ["[2026-06-20 10:00] A (photo, text): <ocr of p.jpg> | caption: look"]
+
+
+def test_photo_ocr_empty_falls_back_to_marker(tmp_path):
+    (tmp_path / "p.jpg").write_bytes(b"x")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A", "photo": "p.jpg",
+                 "text_entities": [{"type": "plain", "text": "hi"}]}]
+    lines, stats = build_transcript(
+        messages, str(tmp_path), fake_transcribe, describe=lambda p: "   ")
+    assert lines == ["[2026-06-20 10:00] A (photo): hi"]
+    assert stats["media"] == 1 and "described" not in stats
+
+
+def test_photo_ocr_missing_file_not_called():
+    calls = []
+
+    def spy(path):
+        calls.append(path)
+        return "text"
+
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "photo": "(File not included. Change data exporting settings to download.)"}]
+    lines, _ = build_transcript(messages, ".", fake_transcribe, describe=spy)
+    assert calls == []
+    assert lines == ["[2026-06-20 10:00] A (photo)"]
+
+
+def test_photo_unchanged_without_describer():
+    """With no describer, photos stay plain markers (default behaviour, backward compatible)."""
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A", "photo": "p.jpg",
+                 "text_entities": [{"type": "plain", "text": "hi"}]}]
+    lines, _ = build_transcript(messages, ".", fake_transcribe)
+    assert lines == ["[2026-06-20 10:00] A (photo): hi"]
 
 
 # --- find_json ------------------------------------------------------------------------
