@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.0] - 2026-06-25
+
+### Changed
+- **Photo scene captions are now ON by default** and run automatically whenever the optional
+  `[describe]` extra is installed — no flag needed. Pass **`--no-describe`** to skip them (no model
+  load or download). If the extra isn't installed, photos fall back to a plain `(photo)` marker with
+  a one-line hint, so a default install never breaks. The model loads **lazily on the first photo**,
+  so a photo-less chat never triggers the download.
+- **Describe backend switched from llama.cpp to transformers + SmolVLM-500M.** This fixes the real
+  Windows failures the llama.cpp path hit: `llama-cpp-python` needing a C++ compiler to build, and a
+  `STATUS_ILLEGAL_INSTRUCTION` crash from CPU-SIMD-mismatched prebuilt wheels. `transformers` +
+  `torch` ship prebuilt wheels for every platform, dispatch CPU instructions at runtime, and use the
+  GPU automatically when present.
+
+### Removed
+- The opt-in `--describe` flag — captioning is the default now; use `--no-describe` to opt out.
+
+---
+
 ## [0.3.1] - 2026-06-25
 
 ### Changed

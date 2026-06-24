@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -371,58 +371,61 @@ def make_ocr(lang: str) -> Describer:
 
 
 def make_describer(
-    model_repo: str = "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF",
-    gguf: str = "SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
-    mmproj: str = "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+    model_id: str = "HuggingFaceTB/SmolVLM-500M-Instruct",
     prompt: str = "Describe this image in one short sentence.",
-) -> Describer:
-    """Build a caching scene-caption ``describe(image_path) -> text`` closure.
+) -> Optional[Describer]:
+    """Build a caching scene-caption ``describe(image_path) -> text`` closure, or ``None``.
 
-    Runs a small local vision model (SmolVLM2-500M, Apache-2.0) through llama.cpp - no torch,
-    ~500 MB of weights downloaded once from Hugging Face then fully offline. Install with
-    ``pip install whispergram[describe]``. Captions are short, English, and best-effort: a guess
-    at the scene, never literal content (use --ocr for the text inside an image).
+    Runs a small local vision model (SmolVLM-500M, Apache-2.0) via transformers. Weights (~1 GB)
+    download once from Hugging Face then run offline - on the GPU if available, else the CPU.
+    Captioning is on by default; if the optional deps are not installed this returns ``None``
+    (photos fall back to a plain ``(photo)`` marker) instead of failing the run. The model loads
+    lazily on the first photo, so a photo-less chat never triggers the download. Captions are
+    short, English, and best-effort - a guess at the scene, never literal content (use --ocr for
+    the text inside an image). Enable with ``pip install whispergram[describe]``.
     """
     try:
-        import base64
-        import mimetypes
-
-        from huggingface_hub import hf_hub_download
-        from llama_cpp import Llama
-        from llama_cpp.llama_chat_format import Llava15ChatHandler
+        import torch
+        from PIL import Image
+        from transformers import AutoModelForImageTextToText, AutoProcessor
     except ImportError:
-        sys.exit(
-            "--describe needs a local vision model: `pip install whispergram[describe]` "
-            "(llama-cpp-python + huggingface-hub). Or drop --describe."
+        print(
+            "Note: photos are not described - enable scene captions with "
+            "`pip install whispergram[describe]`, or pass --no-describe to silence this."
         )
+        return None
 
-    clip = hf_hub_download(model_repo, mmproj)
-    handler = Llava15ChatHandler(clip_model_path=clip, verbose=False)
-    llm = Llama.from_pretrained(
-        model_repo, filename=gguf, chat_handler=handler,
-        n_ctx=4096, n_gpu_layers=0, verbose=False,
-    )
+    state: dict = {}
     cache: dict = {}
 
     def describe(path: str) -> str:
-        if path not in cache:
-            print(f"  describing {os.path.basename(path)} ...")
-            try:
-                mime = mimetypes.guess_type(path)[0] or "image/jpeg"
-                with open(path, "rb") as fh:
-                    uri = f"data:{mime};base64," + base64.b64encode(fh.read()).decode()
-                out = llm.create_chat_completion(
-                    messages=[{"role": "user", "content": [
-                        {"type": "image_url", "image_url": {"url": uri}},
-                        {"type": "text", "text": prompt},
-                    ]}],
-                    max_tokens=64, temperature=0.2,
-                )
-                caption = out["choices"][0]["message"].get("content") or ""
-            except Exception as exc:
-                print(f"    describe failed on {os.path.basename(path)}: {exc}")
-                caption = ""
-            cache[path] = " ".join(caption.split())
+        if path in cache:
+            return cache[path]
+        if not state:  # lazy one-time load on the first photo
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.float16 if device == "cuda" else torch.float32
+            print(f"Describer: {model_id} on {device} (model loads/downloads on first photo)")
+            state["proc"] = AutoProcessor.from_pretrained(model_id)
+            state["model"] = AutoModelForImageTextToText.from_pretrained(
+                model_id, torch_dtype=dtype
+            ).to(device).eval()
+            state["device"] = device
+        print(f"  describing {os.path.basename(path)} ...")
+        try:
+            proc = state["proc"]
+            image = Image.open(path).convert("RGB")
+            messages = [{"role": "user", "content": [
+                {"type": "image"}, {"type": "text", "text": prompt}]}]
+            text = proc.apply_chat_template(messages, add_generation_prompt=True)
+            inputs = proc(text=text, images=[image], return_tensors="pt").to(state["device"])
+            with torch.no_grad():
+                generated = state["model"].generate(**inputs, max_new_tokens=64, do_sample=False)
+            decoded = proc.batch_decode(generated, skip_special_tokens=True)[0]
+            caption = decoded.split("Assistant:")[-1].strip()
+        except Exception as exc:
+            print(f"    describe failed on {os.path.basename(path)}: {exc}")
+            caption = ""
+        cache[path] = " ".join(caption.split())
         return cache[path]
 
     return describe
@@ -454,8 +457,9 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
                     help="extract text from photos with local OCR (Tesseract); off by default")
     ap.add_argument("--ocr-lang", default="eng",
                     help="Tesseract language(s) for --ocr, e.g. eng or ukr+rus+eng (default: eng)")
-    ap.add_argument("--describe", action="store_true",
-                    help="describe a photo's scene with a local vision model; off by default")
+    ap.add_argument("--no-describe", action="store_true",
+                    help="skip photo scene captions (no model load/download); on by default "
+                         "when the [describe] extra is installed")
     ap.add_argument("--no-media-markers", action="store_true",
                     help="omit (sticker)/(photo)/(file) markers for non-voice media")
     ap.add_argument("--dry-run", action="store_true",
@@ -494,7 +498,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         def transcribe(_path: str) -> str:
             return "[dry-run - not transcribed]"
 
-        if args.describe:
+        if not args.no_describe:
             def describer(_path: str) -> str:
                 return "[dry-run - not described]"
 
@@ -504,8 +508,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         model = load_model(args.model, args.device)
         transcribe = make_transcriber(model, args.lang)
-        if args.describe:
-            describer = make_describer()
+        if not args.no_describe:
+            describer = make_describer()  # None (with a hint) if the extra isn't installed
         if args.ocr:
             ocr = make_ocr(args.ocr_lang)
 
