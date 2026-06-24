@@ -11,19 +11,22 @@
 [![Last commit](https://img.shields.io/github/last-commit/davidmalko87/whispergram.svg)](https://github.com/davidmalko87/whispergram/commits/master)
 [![GitHub issues](https://img.shields.io/github/issues/davidmalko87/whispergram.svg)](https://github.com/davidmalko87/whispergram/issues)
 
-> **Telegram voice-to-text, locally.** Transcribe Telegram **voice and round video messages** with
-> Whisper ([faster-whisper](https://github.com/SYSTRAN/faster-whisper)) and merge them into one
-> searchable, LLM-ready chat transcript — **100% offline, no API key, no cloud.**
+> **A Telegram chat — voice, video *and* photos — as one searchable transcript, fully local.**
+> Transcribe voice & round-video notes with Whisper ([faster-whisper](https://github.com/SYSTRAN/faster-whisper)),
+> **read text from screenshots with OCR**, and **caption photo scenes with a local vision model** —
+> all merged into one chronological, LLM-ready file. **100% offline, no API key, no cloud.**
 
-Every line is tagged by sender and timestamp, with voice notes transcribed inline next to the text:
+Every line is tagged by sender and timestamp — voice, video **and photos** turned into readable text:
 
 ```
-[2026-06-20 12:33] Alex (voice 14s): hey, just finished the thing we talked about
-[2026-06-20 12:35] You: nice, send it over
-[2026-06-20 12:46] Alex (video-note 8s): here it is
-[2026-06-20 12:47] You (photo): looks great
+[2026-06-20 12:33] Alex (voice 14s): just finished the auth flow, take a look
+[2026-06-20 12:35] You: nice, send the diagram
+[2026-06-20 12:46] Alex (photo, described): a hand-drawn architecture diagram on a whiteboard | text: Login -> API -> DB
+[2026-06-20 12:47] You (video-note 6s): looks great, let's ship it
 [2026-06-20 12:47] Alex (sticker 👍)
 ```
+
+> Photos become text two ways: `--describe` captions the scene, `--ocr` reads any text in the image.
 
 ---
 
@@ -117,12 +120,13 @@ The result is `merged_chat.md` in the export folder.
 
 ```
 [2026-06-20 12:33] Alex: did you get the files?
-[2026-06-20 12:33] You: yep, check https://example.com thanks
 [2026-06-20 12:34] Alex (voice 6s): one sec, recording the summary now ...
-[2026-06-20 12:35] Alex (video-note 8s): [not exported]
-[2026-06-20 12:35] You (sticker 😅)
-[2026-06-20 12:36] Alex (photo): the whiteboard from today
+[2026-06-20 12:35] You (photo, described): a screenshot of a calendar app | text: Sprint review - Fri 15:00
+[2026-06-20 12:36] Alex (video-note 8s): [not exported]
+[2026-06-20 12:36] You (sticker 😅)
 ```
+
+> The photo line is shown with `--describe --ocr`; without them a photo appears as a plain `(photo)` marker.
 
 ---
 
