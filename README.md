@@ -26,7 +26,7 @@ Every line is tagged by sender and timestamp — voice, video **and photos** tur
 [2026-06-20 12:47] Alex (sticker 👍)
 ```
 
-> Photos become text two ways: `--describe` captions the scene, `--ocr` reads any text in the image.
+> Photos become text two ways: a local vision model captions the scene (on by default), and `--ocr` reads any text in the image.
 
 ---
 
@@ -56,8 +56,8 @@ search, or feed to a model.
 | **Auto-detect** | Finds the export JSON (any filename) and the language per file |
 | **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
 | **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
-| **Photo descriptions** | `--describe` captions a photo's *scene* with a local vision model (no torch, no cloud) |
-| **Tested** | 58 offline tests on the Python 3.9–3.13 CI matrix |
+| **Photo descriptions** | Photos are captioned automatically by a local vision model (SmolVLM) when `whispergram[describe]` is installed — `--no-describe` to skip |
+| **Tested** | 59 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -126,7 +126,7 @@ The result is `merged_chat.md` in the export folder.
 [2026-06-20 12:36] You (sticker 😅)
 ```
 
-> The photo line is shown with `--describe --ocr`; without them a photo appears as a plain `(photo)` marker.
+> Photo captioning is automatic once `whispergram[describe]` is installed; add `--ocr` for the in-image text, or `--no-describe` for a plain `(photo)` marker.
 
 ---
 
@@ -140,15 +140,15 @@ The result is `merged_chat.md` in the export folder.
 | Voice/video note **with caption** | `[time] sender (voice 12s): <transcript> \| caption: <text>` |
 | Voice/video not downloaded | `[time] sender (voice 12s): [not exported]` |
 | Sticker | `[time] sender (sticker 😅)` |
-| Photo (with caption) | `[time] sender (photo): caption` |
+| Photo, `--no-describe` | `[time] sender (photo): caption` (plain marker, no captioning) |
 | Animation / GIF | `[time] sender (animation)` |
 | Document | `[time] sender (file: report.pdf): caption` |
 | Location / poll / contact | `[time] sender (location)` · `(poll)` · `(contact)` |
 | Music / audio file | `[time] sender (audio: Artist - Title)` — transcribe with `--audio-files` |
 | Regular video file | `[time] sender (video)` — transcribe the audio with `--video-files` |
-| Photo **with `--ocr`** | `[time] sender (photo, text): <text found in the image>` |
-| Photo **with `--describe`** | `[time] sender (photo, described): <a caption of the scene>` |
-| Photo **with both** | `[time] sender (photo, described): <scene> \| text: <in-image text>` |
+| Photo (default, `[describe]` installed) | `[time] sender (photo, described): a caption of the scene` |
+| Photo + `--ocr` | `[time] sender (photo, described): <scene> \| text: <text found in the image>` |
+| Photo + `--ocr --no-describe` | `[time] sender (photo, text): <text found in the image>` |
 
 Markers can be turned off with `--no-media-markers` (voice/video notes are always transcribed).
 
@@ -190,7 +190,7 @@ of effort in the tool:
 | Round video notes | Audio only, if downloaded | Telegram often excludes the binary; those show `[not exported]` |
 | Music / `audio_file` | Off by default | Opt in with `--audio-files`; songs are otherwise not run through ASR |
 | Photo OCR | Text-in-image only | `--ocr` reads visible text (great for screenshots), not a description of the scene; needs Tesseract + language packs |
-| Photo descriptions | Best-effort, local | `--describe` captions a photo's scene with a small local model (SmolVLM2) — short, English, and a *guess*, not literal fact; opt-in `whispergram[describe]` |
+| Photo descriptions | Best-effort, local | On by default with `whispergram[describe]` (SmolVLM-500M via transformers) — captions are short, English, and a *guess*, not literal fact; `--no-describe` to skip |
 | Speaker labels | Sender only | Each note is attributed to its Telegram sender; no in-audio diarization |
 | Timestamps | Minute resolution | Telegram exports `YYYY-MM-DDThh:mm`; seconds are not shown |
 | Reactions / edits / replies | Not represented | The merged file is a clean reading transcript, not a full forensic dump |
@@ -207,7 +207,7 @@ whispergram --dry-run                             # preview the merge, no transc
 whispergram --audio-files                         # also transcribe music/long audio files
 whispergram --video-files                         # also transcribe regular videos' audio
 whispergram --ocr --ocr-lang ukr+rus+eng          # read text from photos (local Tesseract)
-whispergram --describe                            # caption a photo's scene (local vision model)
+whispergram --no-describe                         # skip photo scene captions
 whispergram --out result.md                       # custom output path
 ```
 
@@ -221,7 +221,7 @@ whispergram --out result.md                       # custom output path
 | `--video-files` | off | also transcribe regular video files' audio track |
 | `--ocr` | off | extract text from photos with local Tesseract OCR |
 | `--ocr-lang` | `eng` | Tesseract language(s), e.g. `ukr+rus+eng` |
-| `--describe` | off | caption a photo's scene with a local vision model |
+| `--no-describe` | off | skip photo scene captions (on by default when `[describe]` is installed) |
 | `--no-media-markers` | off | omit `(sticker)` / `(photo)` / `(file)` markers |
 | `--dry-run` | off | map the chat without loading a model or transcribing |
 | `--setup-cuda-windows` | — | copy CUDA DLLs next to ctranslate2, then exit (Windows GPU fix) |
@@ -273,10 +273,11 @@ Yes — `--ocr` runs local Tesseract over photos and drops the extracted text in
 `(photo, text): ...` (ideal for screenshots).
 
 **Can it describe what's *in* a photo, not just the text?**
-Yes — `--describe` captions the scene ("two people at a whiteboard") with a small local vision
-model (SmolVLM2 via llama.cpp — no torch, no cloud). It composes with `--ocr` to give both the
-scene and the in-image text. Captions are short, English, and best-effort. Install with
-`pip install whispergram[describe]`; everything stays offline (the model downloads once).
+Yes, and it's **automatic**: once you `pip install whispergram[describe]`, photos are captioned by a
+small local vision model (SmolVLM-500M via transformers — uses your GPU if you have one, else CPU)
+with no flag needed. It composes with `--ocr` to give both the scene and the in-image text. Captions
+are short, English, and best-effort. Pass `--no-describe` to turn it off. The ~1 GB model downloads
+once on the first photo, then stays offline.
 
 **Which languages work?**
 Any language Whisper supports. `large-v3` handles Ukrainian and Russian well; use `--lang uk` (or
@@ -308,7 +309,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 58 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 59 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)
@@ -338,7 +339,7 @@ sensitive as the audio. Two rules:
 - [`faster-whisper`](https://pypi.org/project/faster-whisper/) >= 1.0 (`pip install -r requirements.txt`)
 - For NVIDIA GPU on Windows: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `ctranslate2>=4.5`
 - For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install whispergram[ocr]`
-- For `--describe` (optional): `pip install whispergram[describe]` (llama-cpp-python + huggingface-hub); the ~500 MB SmolVLM2 model downloads once on first run, then runs offline
+- For photo descriptions (optional): `pip install whispergram[describe]` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1 GB SmolVLM model downloads once on the first photo, then runs offline. `--no-describe` turns it off
 
 > The test suite needs none of the above — only `ruff` and `pytest`.
 

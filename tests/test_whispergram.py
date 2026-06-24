@@ -477,6 +477,22 @@ def test_main_missing_dir_exits(tmp_path):
         main(["--dry-run", str(tmp_path / "does_not_exist")])
 
 
+def test_main_describes_photos_by_default(tmp_path):
+    """Photo captioning is on by default; --no-describe turns it off (dry-run uses a stub)."""
+    (tmp_path / "photos").mkdir()
+    (tmp_path / "photos" / "p.jpg").write_bytes(b"x")
+    (tmp_path / "result.json").write_text(json.dumps({"messages": [
+        {"type": "message", "date": "2026-06-20T10:00:00", "from": "A", "photo": "photos/p.jpg"}]}))
+    out = tmp_path / "m.md"
+
+    main(["--dry-run", str(tmp_path), "--out", str(out)])
+    assert out.read_text(encoding="utf-8").strip() == (
+        "[2026-06-20 10:00] A (photo, described): [dry-run - not described]")
+
+    main(["--dry-run", "--no-describe", str(tmp_path), "--out", str(out)])
+    assert out.read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] A (photo)"
+
+
 # --- metadata -------------------------------------------------------------------------
 def test_version_is_semver():
     parts = __version__.split(".")
