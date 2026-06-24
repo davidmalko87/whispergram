@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.4.1] - 2026-06-25
+
+### Fixed
+- **Photo descriptions now actually run on transformers 5.x.** The 0.4.0 describer loaded SmolVLM
+  through the `Auto*` classes, which fail on transformers 5.x with
+  `ValueError: Unrecognized image processor` (the model's `preprocessor_config.json` no longer
+  resolves through `AutoProcessor` / `AutoImageProcessor`, and the `image-to-text` pipeline task was
+  removed in 5.x). Switched to **BLIP** (`Salesforce/blip-image-captioning-base`, BSD-3) loaded via
+  its dedicated `BlipProcessor` / `BlipForConditionalGeneration` classes — no Auto-resolution.
+  Verified end-to-end on torch 2.12 + transformers 5.12. Captions are a short scene gist; the
+  `[describe]` extra no longer needs `num2words`.
+
+---
+
 ## [0.4.0] - 2026-06-25
 
 ### Changed

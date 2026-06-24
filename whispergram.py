@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -371,23 +371,24 @@ def make_ocr(lang: str) -> Describer:
 
 
 def make_describer(
-    model_id: str = "HuggingFaceTB/SmolVLM-500M-Instruct",
-    prompt: str = "Describe this image in one short sentence.",
+    model_id: str = "Salesforce/blip-image-captioning-base",
 ) -> Optional[Describer]:
     """Build a caching scene-caption ``describe(image_path) -> text`` closure, or ``None``.
 
-    Runs a small local vision model (SmolVLM-500M, Apache-2.0) via transformers. Weights (~1 GB)
-    download once from Hugging Face then run offline - on the GPU if available, else the CPU.
-    Captioning is on by default; if the optional deps are not installed this returns ``None``
-    (photos fall back to a plain ``(photo)`` marker) instead of failing the run. The model loads
-    lazily on the first photo, so a photo-less chat never triggers the download. Captions are
-    short, English, and best-effort - a guess at the scene, never literal content (use --ocr for
-    the text inside an image). Enable with ``pip install whispergram[describe]``.
+    Runs a small local image-captioning model (BLIP, BSD-3) via transformers, loaded through its
+    dedicated ``BlipProcessor`` / ``BlipForConditionalGeneration`` classes (the Auto-classes do
+    not resolve cleanly on transformers 5.x). Weights (~1 GB) download once from Hugging Face then
+    run offline - on the GPU if available, else the CPU. Captioning is on by default; if the
+    optional deps are not installed this returns ``None`` (photos fall back to a plain ``(photo)``
+    marker) instead of failing the run. The model loads lazily on the first photo, so a photo-less
+    chat never triggers the download. Captions are a short, English, best-effort gist of the scene,
+    never literal content (use --ocr for the text inside an image). Enable with
+    ``pip install whispergram[describe]``.
     """
     try:
         import torch
         from PIL import Image
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import BlipForConditionalGeneration, BlipProcessor
     except ImportError:
         print(
             "Note: photos are not described - enable scene captions with "
@@ -403,25 +404,18 @@ def make_describer(
             return cache[path]
         if not state:  # lazy one-time load on the first photo
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            dtype = torch.float16 if device == "cuda" else torch.float32
             print(f"Describer: {model_id} on {device} (model loads/downloads on first photo)")
-            state["proc"] = AutoProcessor.from_pretrained(model_id)
-            state["model"] = AutoModelForImageTextToText.from_pretrained(
-                model_id, torch_dtype=dtype
-            ).to(device).eval()
+            model = BlipForConditionalGeneration.from_pretrained(model_id)
+            state["proc"] = BlipProcessor.from_pretrained(model_id)
+            state["model"] = model.to(device).eval()
             state["device"] = device
         print(f"  describing {os.path.basename(path)} ...")
         try:
-            proc = state["proc"]
             image = Image.open(path).convert("RGB")
-            messages = [{"role": "user", "content": [
-                {"type": "image"}, {"type": "text", "text": prompt}]}]
-            text = proc.apply_chat_template(messages, add_generation_prompt=True)
-            inputs = proc(text=text, images=[image], return_tensors="pt").to(state["device"])
+            inputs = state["proc"](image, return_tensors="pt").to(state["device"])
             with torch.no_grad():
-                generated = state["model"].generate(**inputs, max_new_tokens=64, do_sample=False)
-            decoded = proc.batch_decode(generated, skip_special_tokens=True)[0]
-            caption = decoded.split("Assistant:")[-1].strip()
+                generated = state["model"].generate(**inputs, max_new_tokens=40, num_beams=3)
+            caption = state["proc"].decode(generated[0], skip_special_tokens=True).strip()
         except Exception as exc:
             print(f"    describe failed on {os.path.basename(path)}: {exc}")
             caption = ""
