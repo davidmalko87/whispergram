@@ -23,18 +23,20 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-# Telegram media types whose audio we transcribe, mapped to their display label.
+# Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
     "voice_message": "voice",
     "video_message": "video-note",
     "audio_file": "audio",
+    "video_file": "video",
 }
 
-# A transcribe(path) -> text callable. Injected so the heavy faster-whisper dependency
-# stays out of the pure mapping logic (and so that logic is unit-testable offline).
-Transcriber = Callable[[str], str]
+# Injected callables, so the heavy faster-whisper / OCR dependencies stay out of the pure
+# mapping logic (and so that logic stays unit-testable offline).
+Transcriber = Callable[[str], str]  # audio/video path -> transcript text
+Describer = Callable[[str], str]    # image path -> extracted text (OCR or caption)
 
 
 # --------------------------------------------------------------------------------------
@@ -142,13 +144,21 @@ def build_transcript(
     *,
     media_markers: bool = True,
     audio_files: bool = False,
+    video_files: bool = False,
+    describe: Optional[Describer] = None,
+    photo_label: str = "text",
 ) -> Tuple[List[str], Counter]:
     """Turn Telegram messages into merged transcript lines, chronological order preserved.
 
-    *transcribe* maps an audio file path to its transcript text. Missing media is never sent
-    to it. Returns ``(lines, stats)`` where ``stats`` counts each outcome category.
+    *transcribe* maps an audio/video path to its transcript text; *describe* (optional) maps a
+    photo path to extracted text (OCR or a caption). Missing media is never sent to either.
+    Returns ``(lines, stats)`` where ``stats`` counts each outcome category.
     """
-    transcribe_types = set(_KIND_LABEL) if audio_files else {"voice_message", "video_message"}
+    transcribe_types = {"voice_message", "video_message"}
+    if audio_files:
+        transcribe_types.add("audio_file")
+    if video_files:
+        transcribe_types.add("video_file")
     lines: List[str] = []
     stats: Counter = Counter()
 
@@ -177,6 +187,20 @@ def build_transcript(
                 line += f" | caption: {text}"
             lines.append(line)
             continue
+
+        if describe is not None and msg.get("photo"):
+            photo_field = msg.get("photo") or ""
+            photo_path = os.path.join(export_dir, photo_field)
+            if not is_missing_media(photo_field, photo_path):
+                extracted = describe(photo_path).strip()
+                if extracted:
+                    line = f"[{ts}] {who} (photo, {photo_label}): {extracted}"
+                    if text:
+                        line += f" | caption: {text}"
+                    lines.append(line)
+                    stats["described"] += 1
+                    continue
+            # photo missing or nothing extracted -> fall through to the plain (photo) marker
 
         marker = media_marker(msg) if media_markers else ""
         if marker:
@@ -290,6 +314,38 @@ def make_transcriber(model, lang: Optional[str]) -> Transcriber:
     return transcribe
 
 
+def make_ocr(lang: str) -> Describer:
+    """Build a caching OCR ``describe(image_path) -> text`` closure (local Tesseract).
+
+    The result is collapsed to a single line. Needs the Tesseract binary on PATH plus the
+    language data packs for *lang* (e.g. ``ukr``, ``rus``); install the Python deps with
+    ``pip install whispergram[ocr]``. A photo Tesseract cannot read returns ``""``.
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        sys.exit(
+            "OCR needs pytesseract + Pillow: `pip install whispergram[ocr]`, and the Tesseract "
+            "binary on PATH (with language packs, e.g. ukr/rus). Or drop --ocr."
+        )
+
+    cache: dict = {}
+
+    def describe(path: str) -> str:
+        if path not in cache:
+            print(f"  reading {os.path.basename(path)} ...")
+            try:
+                raw = pytesseract.image_to_string(Image.open(path), lang=lang)
+            except Exception as exc:
+                print(f"    OCR failed on {os.path.basename(path)}: {exc}")
+                raw = ""
+            cache[path] = " ".join(raw.split())
+        return cache[path]
+
+    return describe
+
+
 # --------------------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------------------
@@ -310,6 +366,12 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
                     help="output file (default: <export_dir>/merged_chat.md)")
     ap.add_argument("--audio-files", action="store_true",
                     help="also transcribe audio_file messages (music, memos); off by default")
+    ap.add_argument("--video-files", action="store_true",
+                    help="also transcribe regular video files' audio track; off by default")
+    ap.add_argument("--ocr", action="store_true",
+                    help="extract text from photos with local OCR (Tesseract); off by default")
+    ap.add_argument("--ocr-lang", default="eng",
+                    help="Tesseract language(s) for --ocr, e.g. eng or ukr+rus+eng (default: eng)")
     ap.add_argument("--no-media-markers", action="store_true",
                     help="omit (sticker)/(photo)/(file) markers for non-voice media")
     ap.add_argument("--dry-run", action="store_true",
@@ -340,14 +402,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     out_path = args.out or os.path.join(args.export_dir, "merged_chat.md")
     print(f"Export: {os.path.basename(json_path)}")
 
+    describe: Optional[Describer] = None
     if args.dry_run:
-        print("Dry run: not loading the model; voice/video notes are not transcribed.")
+        print("Dry run: not loading models; media is not transcribed or read.")
 
         def transcribe(_path: str) -> str:
             return "[dry-run - not transcribed]"
+
+        if args.ocr:
+            def describe(_path: str) -> str:
+                return "[dry-run - not read]"
     else:
         model = load_model(args.model, args.device)
         transcribe = make_transcriber(model, args.lang)
+        if args.ocr:
+            describe = make_ocr(args.ocr_lang)
 
     with open(json_path, encoding="utf-8") as fh:
         data = json.load(fh)
@@ -358,6 +427,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         transcribe,
         media_markers=not args.no_media_markers,
         audio_files=args.audio_files,
+        video_files=args.video_files,
+        describe=describe,
     )
 
     with open(out_path, "w", encoding="utf-8") as fh:
@@ -366,7 +437,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(
         f"\nOK  {out_path}\n"
         f"    {len(lines)} lines | {stats['transcribed']} transcribed | "
-        f"{stats['missing']} not exported | {stats['media']} other media | {stats['text']} text"
+        f"{stats['missing']} not exported | {stats['described']} photos read | "
+        f"{stats['media']} other media | {stats['text']} text"
     )
     return 0
 
