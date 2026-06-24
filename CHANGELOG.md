@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.0] - 2026-06-25
+
+### Added
+- **`--describe`** — extract the *meaning/scene* of a photo or screenshot with a small **local
+  vision model** (SmolVLM2-500M run via llama.cpp — Apache-2.0, **no torch**, ~500 MB downloaded
+  once then fully offline). Renders inline as `(photo, described): a whiteboard of sprint tasks`.
+  Opt-in: `pip install whispergram[describe]`. **Composes with `--ocr`** →
+  `(photo, described): <caption> | text: <in-image text>`. Captions are short, English, and
+  best-effort — a guess at the scene, never literal content; `--ocr` remains the source of truth
+  for text inside an image. This completes the "Photo descriptions" roadmap item from 0.2.0.
+
+### Changed
+- Photo handling now combines an optional scene describer and OCR through a small pure
+  `_photo_reader` helper (6 new offline tests, 58 total). `build_transcript` is unchanged.
+
+---
+
 ## [0.2.0] - 2026-06-25
 
 ### Added

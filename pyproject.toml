@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whispergram"
-version = "0.2.0"
+version = "0.3.0"
 description = "Transcribe Telegram voice & video messages locally with Whisper, merged into one chat transcript"
 readme = "README.md"
 license = "MIT"
@@ -51,6 +51,7 @@ whispergram = "whispergram:main"
 
 [project.optional-dependencies]
 ocr = ["pytesseract>=0.3", "Pillow>=9"]
+describe = ["llama-cpp-python>=0.3.2", "huggingface-hub>=0.23"]
 test = ["pytest>=7.0", "ruff"]
 
 [tool.setuptools]

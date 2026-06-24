@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -223,6 +223,30 @@ def build_transcript(
     return lines, stats
 
 
+def _photo_reader(
+    describer: Optional[Describer], ocr: Optional[Describer]
+) -> Tuple[Optional[Describer], str]:
+    """Combine an optional scene describer and an optional OCR reader into one photo reader.
+
+    Returns ``(describe, photo_label)`` for build_transcript: a vision-model caption is labelled
+    ``described``, OCR text alone is labelled ``text``, and when both are enabled they are merged
+    as ``<caption> | text: <ocr>``. Returns ``(None, "text")`` when neither is enabled.
+    """
+    if describer and ocr:
+        def describe(path: str) -> str:
+            caption = describer(path).strip()
+            in_image = ocr(path).strip()
+            if caption and in_image:
+                return f"{caption} | text: {in_image}"
+            return caption or (f"text: {in_image}" if in_image else "")
+        return describe, "described"
+    if describer:
+        return describer, "described"
+    if ocr:
+        return ocr, "text"
+    return None, "text"
+
+
 # --------------------------------------------------------------------------------------
 # Runtime transcription (faster-whisper) - imported lazily so the module loads, and the
 # pure logic above is testable, without the heavy dependency installed.
@@ -346,6 +370,64 @@ def make_ocr(lang: str) -> Describer:
     return describe
 
 
+def make_describer(
+    model_repo: str = "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF",
+    gguf: str = "SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+    mmproj: str = "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+    prompt: str = "Describe this image in one short sentence.",
+) -> Describer:
+    """Build a caching scene-caption ``describe(image_path) -> text`` closure.
+
+    Runs a small local vision model (SmolVLM2-500M, Apache-2.0) through llama.cpp - no torch,
+    ~500 MB of weights downloaded once from Hugging Face then fully offline. Install with
+    ``pip install whispergram[describe]``. Captions are short, English, and best-effort: a guess
+    at the scene, never literal content (use --ocr for the text inside an image).
+    """
+    try:
+        import base64
+        import mimetypes
+
+        from huggingface_hub import hf_hub_download
+        from llama_cpp import Llama
+        from llama_cpp.llama_chat_format import Llava15ChatHandler
+    except ImportError:
+        sys.exit(
+            "--describe needs a local vision model: `pip install whispergram[describe]` "
+            "(llama-cpp-python + huggingface-hub). Or drop --describe."
+        )
+
+    clip = hf_hub_download(model_repo, mmproj)
+    handler = Llava15ChatHandler(clip_model_path=clip, verbose=False)
+    llm = Llama.from_pretrained(
+        model_repo, filename=gguf, chat_handler=handler,
+        n_ctx=4096, n_gpu_layers=0, verbose=False,
+    )
+    cache: dict = {}
+
+    def describe(path: str) -> str:
+        if path not in cache:
+            print(f"  describing {os.path.basename(path)} ...")
+            try:
+                mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+                with open(path, "rb") as fh:
+                    uri = f"data:{mime};base64," + base64.b64encode(fh.read()).decode()
+                out = llm.create_chat_completion(
+                    messages=[{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": uri}},
+                        {"type": "text", "text": prompt},
+                    ]}],
+                    max_tokens=64, temperature=0.2,
+                )
+                caption = out["choices"][0]["message"].get("content") or ""
+            except Exception as exc:
+                print(f"    describe failed on {os.path.basename(path)}: {exc}")
+                caption = ""
+            cache[path] = " ".join(caption.split())
+        return cache[path]
+
+    return describe
+
+
 # --------------------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------------------
@@ -372,6 +454,8 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
                     help="extract text from photos with local OCR (Tesseract); off by default")
     ap.add_argument("--ocr-lang", default="eng",
                     help="Tesseract language(s) for --ocr, e.g. eng or ukr+rus+eng (default: eng)")
+    ap.add_argument("--describe", action="store_true",
+                    help="describe a photo's scene with a local vision model; off by default")
     ap.add_argument("--no-media-markers", action="store_true",
                     help="omit (sticker)/(photo)/(file) markers for non-voice media")
     ap.add_argument("--dry-run", action="store_true",
@@ -402,21 +486,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     out_path = args.out or os.path.join(args.export_dir, "merged_chat.md")
     print(f"Export: {os.path.basename(json_path)}")
 
-    describe: Optional[Describer] = None
+    describer: Optional[Describer] = None
+    ocr: Optional[Describer] = None
     if args.dry_run:
-        print("Dry run: not loading models; media is not transcribed or read.")
+        print("Dry run: not loading models; media is not transcribed, described, or read.")
 
         def transcribe(_path: str) -> str:
             return "[dry-run - not transcribed]"
 
+        if args.describe:
+            def describer(_path: str) -> str:
+                return "[dry-run - not described]"
+
         if args.ocr:
-            def describe(_path: str) -> str:
+            def ocr(_path: str) -> str:
                 return "[dry-run - not read]"
     else:
         model = load_model(args.model, args.device)
         transcribe = make_transcriber(model, args.lang)
+        if args.describe:
+            describer = make_describer()
         if args.ocr:
-            describe = make_ocr(args.ocr_lang)
+            ocr = make_ocr(args.ocr_lang)
+
+    describe, photo_label = _photo_reader(describer, ocr)
 
     with open(json_path, encoding="utf-8") as fh:
         data = json.load(fh)
@@ -429,6 +522,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         audio_files=args.audio_files,
         video_files=args.video_files,
         describe=describe,
+        photo_label=photo_label,
     )
 
     with open(out_path, "w", encoding="utf-8") as fh:
