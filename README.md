@@ -56,7 +56,7 @@ search, or feed to a model.
 | **Auto-detect** | Finds the export JSON (any filename) and the language per file |
 | **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
 | **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
-| **Photo descriptions** | Photos are captioned automatically by a local vision model (SmolVLM) when `whispergram[describe]` is installed — `--no-describe` to skip |
+| **Photo descriptions** | Photos are captioned automatically by a local model (BLIP) when `whispergram[describe]` is installed — `--no-describe` to skip |
 | **Tested** | 59 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
@@ -190,7 +190,7 @@ of effort in the tool:
 | Round video notes | Audio only, if downloaded | Telegram often excludes the binary; those show `[not exported]` |
 | Music / `audio_file` | Off by default | Opt in with `--audio-files`; songs are otherwise not run through ASR |
 | Photo OCR | Text-in-image only | `--ocr` reads visible text (great for screenshots), not a description of the scene; needs Tesseract + language packs |
-| Photo descriptions | Best-effort, local | On by default with `whispergram[describe]` (SmolVLM-500M via transformers) — captions are short, English, and a *guess*, not literal fact; `--no-describe` to skip |
+| Photo descriptions | Best-effort, local | On by default with `whispergram[describe]` (BLIP via transformers) — captions are a short, English scene *gist*, not literal fact; `--no-describe` to skip |
 | Speaker labels | Sender only | Each note is attributed to its Telegram sender; no in-audio diarization |
 | Timestamps | Minute resolution | Telegram exports `YYYY-MM-DDThh:mm`; seconds are not shown |
 | Reactions / edits / replies | Not represented | The merged file is a clean reading transcript, not a full forensic dump |
@@ -274,7 +274,7 @@ Yes — `--ocr` runs local Tesseract over photos and drops the extracted text in
 
 **Can it describe what's *in* a photo, not just the text?**
 Yes, and it's **automatic**: once you `pip install whispergram[describe]`, photos are captioned by a
-small local vision model (SmolVLM-500M via transformers — uses your GPU if you have one, else CPU)
+small local model (BLIP via transformers — uses your GPU if you have one, else CPU)
 with no flag needed. It composes with `--ocr` to give both the scene and the in-image text. Captions
 are short, English, and best-effort. Pass `--no-describe` to turn it off. The ~1 GB model downloads
 once on the first photo, then stays offline.
@@ -339,7 +339,7 @@ sensitive as the audio. Two rules:
 - [`faster-whisper`](https://pypi.org/project/faster-whisper/) >= 1.0 (`pip install -r requirements.txt`)
 - For NVIDIA GPU on Windows: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `ctranslate2>=4.5`
 - For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install whispergram[ocr]`
-- For photo descriptions (optional): `pip install whispergram[describe]` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1 GB SmolVLM model downloads once on the first photo, then runs offline. `--no-describe` turns it off
+- For photo descriptions (optional): `pip install whispergram[describe]` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1 GB BLIP model downloads once on the first photo, then runs offline. `--no-describe` turns it off
 
 > The test suite needs none of the above — only `ruff` and `pytest`.
 
