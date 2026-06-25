@@ -60,7 +60,7 @@ search, or feed to a model.
 | **Resumable** | Progress is cached per file — close the terminal or crash, then re-run and it continues where it left off |
 | **Queue folders** | Transcribe many exports in one command (models load once); `--out-dir` collects the results |
 | **Progress bar** | Live `done/total` + ETA per folder |
-| **Round-trip verified** | A rich synthetic export runs through the full pipeline and is diffed line-for-line; 81 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | A rich synthetic export runs through the full pipeline and is diffed line-for-line; 85 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -300,6 +300,7 @@ whispergram --out result.md                       # custom output path
 | `--device` | `cuda` | `cuda` or `cpu`; auto-falls back to CPU if the GPU fails |
 | `--model` | `large-v3` | try `large-v3-turbo` or `medium` if CPU is slow |
 | `--lang` | auto | force a code like `uk`, `ru`, `en` if auto-detect mislabels |
+| `--batch-size` | 0 | `N`>1 batches segments for a big **GPU** speedup; 0 = sequential (best quality) |
 | `--out` | `merged_chat.md` | output file for a **single** folder (mutually exclusive with `--out-dir`) |
 | `--out-dir` | off | collect each queued folder's transcript here as `<chat name>.md` |
 | `--no-cache` | off | don't read/write the per-folder `.whispergram_cache.json` resume cache |
@@ -430,7 +431,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 81 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 85 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

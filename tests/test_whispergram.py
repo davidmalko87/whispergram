@@ -18,6 +18,7 @@ from whispergram import (
     _Cache,
     _cache_key,
     _dedupe_output,
+    _parse_args,
     _photo_reader,
     _safe_name,
     _with_cache,
@@ -27,6 +28,7 @@ from whispergram import (
     find_json,
     is_missing_media,
     main,
+    make_transcriber,
     media_marker,
 )
 
@@ -861,6 +863,58 @@ def test_round_trip_resume_recomputes_nothing(tmp_path, monkeypatch):
     main(["--audio-files", "--video-files", str(export), "--out", str(out)])
     assert t2 == [] and d2 == []                         # resume: nothing recomputed
     assert out.read_text(encoding="utf-8").splitlines() == _RICH_EXPECTED  # identical output
+
+
+# --- batched inference + BOM tolerance (v0.8.0) ---------------------------------------
+class _FakeSeg:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeModel:
+    """Stand-in for a loaded WhisperModel: records calls, returns fixed segments."""
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, path, language=None, vad_filter=True, **kw):
+        self.calls.append({"path": path, "batch_size": kw.get("batch_size")})
+        return [_FakeSeg(" hello "), _FakeSeg("world ")], None
+
+
+def test_make_transcriber_sequential_default():
+    """batch_size 0 uses the plain model.transcribe path (no faster-whisper import needed)."""
+    m = _FakeModel()
+    transcribe = make_transcriber(m, None)            # default batch_size=0
+    assert transcribe("a.ogg") == "hello world"
+    assert transcribe("a.ogg") == "hello world"       # cached, model called once
+    assert len(m.calls) == 1
+    assert m.calls[0]["batch_size"] is None           # plain model gets no batch_size kwarg
+
+
+def test_make_transcriber_empty_is_no_speech():
+    class Silent(_FakeModel):
+        def transcribe(self, path, language=None, vad_filter=True, **kw):
+            return [], None
+    assert make_transcriber(Silent(), None)("x.ogg") == "[no speech]"
+
+
+def test_batch_size_flag_parses():
+    assert _parse_args(["."]).batch_size == 0               # default off
+    assert _parse_args(["--batch-size", "16", "."]).batch_size == 16
+
+
+def test_main_tolerates_utf8_bom_json(tmp_path):
+    """Some exports/edited JSON carry a UTF-8 BOM; it must not crash the run."""
+    d = tmp_path / "exp"
+    d.mkdir()
+    payload = {"name": "BOM", "messages": [
+        {"type": "message", "date": "2026-06-20T10:00:00", "from": "X",
+         "text_entities": [{"type": "plain", "text": "hi"}]}]}
+    (d / "result.json").write_text(json.dumps(payload), encoding="utf-8-sig")  # writes a BOM
+    out = tmp_path / "merged.md"
+    rc = main(["--dry-run", "--no-describe", str(d), "--out", str(out)])
+    assert rc == 0
+    assert out.read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] X: hi"
 
 
 def test_version_is_semver():

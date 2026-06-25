@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.8.0] - 2026-06-26
+
+### Added
+- **`--batch-size N`** — batched transcription via faster-whisper's `BatchedInferencePipeline`, a
+  large speedup on a **GPU** (try `8` or `16`) using the same model weights. Each chunk is decoded
+  independently (slightly less cross-segment context), so the default stays `0` = sequential — the
+  best quality, especially for connected Ukrainian/Russian speech.
+
+### Fixed
+- Export JSON is read as `utf-8-sig`, so a `result.json` with a leading UTF-8 BOM no longer crashes
+  the run with `JSONDecodeError`.
+
+---
+
 ## [0.7.0] - 2026-06-26
 
 ### Added
