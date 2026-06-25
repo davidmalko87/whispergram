@@ -56,8 +56,8 @@ search, or feed to a model.
 | **Auto-detect** | Finds the export JSON (any filename) and the language per file |
 | **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
 | **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
-| **Photo descriptions** | Photos are captioned automatically by a local model (BLIP) when `whispergram[describe]` is installed — `--no-describe` to skip |
-| **Tested** | 64 offline tests on the Python 3.9–3.13 CI matrix |
+| **Photo descriptions** | Captioned automatically by the best installed local model — BLIP (`[describe]`) for photos, or Qwen2-VL (`[describe-hq]`) for photos + stickers + GIFs |
+| **Tested** | 66 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -100,8 +100,8 @@ Telegram **Desktop** → open the chat → ⋮ menu → **Export chat history**.
 | **Video messages** | ✅ | Round video notes — transcribed |
 | **Photos** | ✅ for captions / `--ocr` | Scene-captioned and/or OCR'd; without it, photos show as a plain `(photo)` |
 | **Videos** | optional, for `--video-files` | Regular videos — their audio is transcribed |
-| **Stickers** | ⬜ not needed | Shown as `(sticker 😅)` from the JSON metadata — the file itself isn't used |
-| **GIFs** | ⬜ not needed | Shown as `(animation)` from the JSON metadata |
+| **Stickers** | for `--describe-hq` | `(sticker 😅)` comes from JSON; tick to let `--describe-hq` caption the image too |
+| **GIFs** | for `--describe-hq` | `(animation)` comes from JSON; tick to let `--describe-hq` caption it (multi-frame) |
 | **Files** | ⬜ not needed | Shown as `(file: report.pdf)` from the JSON metadata |
 
 > **⚠️ Drag the "Size limit" slider up.** It defaults to **8 MB**, and any file larger than that is
@@ -133,19 +133,19 @@ The result is `merged_chat.md` in the export folder.
 ### Best quality (use your GPU)
 
 Audio and video already use the most accurate model — Whisper **large-v3** — on your GPU by default.
-For the best **photo, sticker and GIF** captions too, install the HQ extra, put torch on the GPU, and
-add `--describe-hq`:
+For the best **photo, sticker and GIF** captions, just install the HQ extra — it's then used
+**automatically, no flag** — and, for speed, put torch on your GPU:
 
 ```bash
 pip install -U "whispergram[describe-hq]"
-# one-time, for GPU speed (match your CUDA version, e.g. cu121/cu124):
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-whispergram --describe-hq          # add --ocr --ocr-lang ukr+rus+eng to also read screenshot text
+# optional, for GPU-fast captions (match your CUDA, e.g. cu121/cu124):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+whispergram        # auto-uses large-v3 + Qwen2-VL; add --ocr --ocr-lang ukr+rus+eng for screenshot text
 ```
 
-That runs **large-v3** (audio/video) + **Qwen2-VL** (photos, stickers, GIFs), all on the GPU. Without
-`--describe-hq`, the lighter BLIP describer captions photos only, and on CPU. See
-[Describe modes](#describe-modes-photos-stickers--gifs) for the trade-offs.
+That runs **large-v3** (audio/video) + **Qwen2-VL** (photos, stickers, GIFs). ⚠️ **On Windows, a CUDA
+build of torch can clash with faster-whisper's GPU** (cuDNN) — see [GPU on Windows](#gpu-cuda-setup)
+for the two reliable setups before installing CUDA torch.
 
 ---
 
@@ -190,17 +190,20 @@ Markers can be turned off with `--no-media-markers` (voice/video notes are alway
 
 ## Describe modes: photos, stickers & GIFs
 
-Image captioning is opt-in via an extra, in three modes:
+Image captioning is opt-in via an extra. **The best installed describer is used automatically — no
+flag needed:**
 
 | Mode | How to enable | What it captions | Model | Size | Speed |
 |---|---|---|---|---|---|
 | **Off** | `--no-describe` | nothing (media shown as markers) | — | — | instant |
-| **Default** | `pip install whispergram[describe]` | **photos** | BLIP-large | ~1.9 GB | fast on CPU |
-| **High-quality** | `pip install whispergram[describe-hq]` + `--describe-hq` | **photos + stickers + GIFs** (GIFs multi-frame) | Qwen2-VL-2B | ~4.4 GB | slow on CPU / fast on GPU |
+| **Light** | `pip install whispergram[describe]` | **photos** | BLIP-large | ~1.9 GB | fast on CPU |
+| **High-quality (auto)** | `pip install whispergram[describe-hq]` | **photos + stickers + GIFs** (GIFs multi-frame) | Qwen2-VL-2B | ~4.4 GB | slow on CPU / fast on GPU |
 
-- **Default (BLIP)** gives a short scene gist for photos — fine for real photos, rough on cartoons.
-- **`--describe-hq` (Qwen2-VL)** is markedly better on cartoons, characters and *actions*, and is the
-  only mode that also describes **stickers and GIFs** (reading several frames so it catches motion).
+- Install the quality you want, then just run `whispergram`: if `[describe-hq]` is present it's used
+  automatically (and captions **stickers + GIFs**); otherwise BLIP captions photos. `--describe-hq`
+  forces HQ; `--no-describe` turns captioning off.
+- **HQ (Qwen2-VL)** is markedly better on cartoons, characters and *actions*, and reads GIFs several
+  frames at a time so it catches motion. **BLIP** is a quick photo gist (rough on cartoons).
 - Add `--ocr` to also pull any in-image text. Everything is local; captions are best-effort, never
   literal fact. To run the models on your GPU, see [GPU setup](#gpu-cuda-setup).
 
@@ -317,6 +320,18 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 whispergram auto-detects CUDA and moves the caption model to the GPU — no flag needed.
 
+> **⚠️ Windows: a CUDA torch can clash with Whisper-on-GPU.** A CUDA build of torch bundles its own
+> cuDNN, which can collide with the cuDNN that faster-whisper (CTranslate2) uses — surfacing as
+> `OSError: [WinError 127] … cudnn_*.dll` on startup. Both can't reliably share the GPU out of the
+> box, so pick one of these stable setups:
+> - **Whisper on GPU + captions on CPU** (default, recommended): keep the **CPU** build of torch
+>   — `pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu`. Fast audio,
+>   slower captions.
+> - **Captions on GPU + Whisper on CPU**: `pip uninstall nvidia-cudnn-cu12 nvidia-cublas-cu12`,
+>   install a CUDA torch, and run with `--device cpu`. Fast captions, slower audio.
+>
+> whispergram prints this guidance if it hits the conflict.
+
 ---
 
 ## FAQ
@@ -387,7 +402,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 64 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 66 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

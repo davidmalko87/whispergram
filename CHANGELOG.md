@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.6.0] - 2026-06-25
+
+### Changed
+- **The best *installed* describer is now used by default — no flag needed.** If the `[describe-hq]`
+  extra (Qwen2-VL) is present, photos **and stickers + GIFs** are captioned automatically; otherwise
+  the lighter BLIP (`[describe]`) captions photos. `--describe-hq` still forces HQ, `--no-describe`
+  turns captioning off. So: install the quality you want, then just run `whispergram`.
+
+### Added
+- **Clear error for the Windows PyTorch/cuDNN conflict.** A CUDA build of torch can clash with
+  faster-whisper's cuDNN (cryptic `OSError: [WinError 127] … cudnn_*.dll` on import). whispergram now
+  catches it and prints the one-line fix (reinstall CPU torch) and points to the new README
+  **GPU on Windows** section, which documents the two stable GPU configurations.
+
+### Docs
+- Telegram export guide: ticking **Stickers / GIFs** is now worthwhile when you use `--describe-hq`
+  (so the files download and can be captioned), where before it was pointless.
+
+---
+
 ## [0.5.0] - 2026-06-25
 
 ### Added
