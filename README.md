@@ -361,6 +361,33 @@ whispergram auto-detects CUDA and moves the caption model to the GPU — no flag
 >
 > whispergram prints this guidance if it hits the conflict.
 
+**Both on the GPU — two passes (fastest for big batches).** Because runs are resumable, you can do
+each heavy step on the GPU in turn without the two libraries ever colliding:
+
+```bash
+# Pass 1 — transcribe everything on the GPU (CPU torch + faster-whisper GPU), no captions:
+whispergram <folders> --out-dir DIR --no-describe
+
+# switch torch to CUDA (captions-on-GPU setup):
+pip uninstall -y nvidia-cudnn-cu12 nvidia-cublas-cu12
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124   # match your CUDA
+
+# Pass 2 — caption on the GPU; Whisper runs on CPU but every transcript is already cached, so it's
+# instant and only the captioning does work:
+whispergram <folders> --out-dir DIR --describe-hq --device cpu
+```
+
+Both expensive stages run on the GPU, the resume cache means no transcription is repeated, and the
+cuDNN clash never happens because only one library touches the GPU per pass.
+
+### Ukrainian / Russian OCR
+
+`--ocr` needs the Tesseract binary (auto-found on Windows since 0.8.2) **and** the language packs.
+On Windows: `winget install UB-Mannheim.TesseractOCR`, then add the `ukr`/`rus` data — either re-run
+that installer and tick them, or drop `ukr.traineddata` + `rus.traineddata`
+([tessdata_best](https://github.com/tesseract-ocr/tessdata_best)) into a folder and point
+`TESSDATA_PREFIX` at it. Verify with `tesseract --list-langs`.
+
 ---
 
 ## FAQ
