@@ -917,6 +917,36 @@ def test_main_tolerates_utf8_bom_json(tmp_path):
     assert out.read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] X: hi"
 
 
+def test_tgs_sticker_left_as_marker(tmp_path):
+    """.tgs (Lottie animated stickers) can't be opened by a vision model: skip the describe
+    attempt, render a plain marker, and don't count it as a job (keeps the bar total honest)."""
+    (tmp_path / "stickers").mkdir()
+    (tmp_path / "stickers" / "a.tgs").write_bytes(b"x")    # present but undescribable
+    (tmp_path / "stickers" / "b.webp").write_bytes(b"x")   # present + describable
+    messages = [
+        {"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+         "media_type": "sticker", "file": "stickers/a.tgs"},
+        {"type": "message", "date": "2026-06-20T10:01:00", "from": "A",
+         "media_type": "sticker", "file": "stickers/b.webp"},
+    ]
+    dm = frozenset({"sticker", "animation"})
+    total = count_jobs(messages, str(tmp_path), describe_media=dm)
+    calls = []
+    lines, _ = build_transcript(messages, str(tmp_path), fake_transcribe,
+                                media_describe=fake_describe, describe_media=dm,
+                                on_job=lambda label: calls.append(label))
+    assert total == len(calls) == 1                        # only the .webp is a describe job
+    assert calls == ["b.webp"]
+    assert "[2026-06-20 10:00] A (sticker)" in lines       # .tgs -> plain marker, not described
+    assert any("(sticker, described): <ocr of b.webp>" in ln for ln in lines)
+
+
+def test_is_describable():
+    assert whispergram._is_describable("x/AnimatedSticker.tgs") is False
+    assert whispergram._is_describable("x/photo.JPG") is True
+    assert whispergram._is_describable("x/sticker.webp") is True
+
+
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)

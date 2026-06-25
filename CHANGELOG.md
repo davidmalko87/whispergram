@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.8.1] - 2026-06-26
+
+### Fixed
+- Telegram animated stickers (`.tgs`, a Lottie vector format no local vision model can open) are now
+  left as plain `(sticker)` markers instead of spamming `describe failed on ….tgs` for each one.
+  They're also no longer counted as describe jobs, so the progress bar total stays accurate.
+
+---
+
 ## [0.8.0] - 2026-06-26
 
 ### Added

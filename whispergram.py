@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -148,6 +148,16 @@ def _transcribe_types(audio_files: bool, video_files: bool) -> frozenset:
     return frozenset(types)
 
 
+# Telegram animated stickers are Lottie vector files (.tgs); no local image/video model can open
+# them, so they're left as plain markers rather than attempted (and not counted as describe jobs).
+_UNDESCRIBABLE_EXT = frozenset({".tgs"})
+
+
+def _is_describable(path: str) -> bool:
+    """False for media a local vision model can't open (e.g. a `.tgs` Lottie sticker)."""
+    return os.path.splitext(path)[1].lower() not in _UNDESCRIBABLE_EXT
+
+
 def build_transcript(
     messages: Iterable[dict],
     export_dir: str,
@@ -221,7 +231,8 @@ def build_transcript(
             # so on_job fires at most once per message (the bar never exceeds its total).
             file_field = msg.get("file") or ""
             media_path = os.path.join(export_dir, file_field)
-            if file_field and not is_missing_media(file_field, media_path):
+            present = file_field and not is_missing_media(file_field, media_path)
+            if present and _is_describable(media_path):
                 if on_job is not None:
                     on_job(os.path.basename(media_path))
                 extracted = media_describe(media_path).strip()
@@ -286,7 +297,8 @@ def count_jobs(
             continue
         if describe_media and media_type in describe_media:
             f = msg.get("file") or ""
-            if f and not is_missing_media(f, os.path.join(export_dir, f)):
+            p = os.path.join(export_dir, f)
+            if f and not is_missing_media(f, p) and _is_describable(p):
                 n += 1
     return n
 

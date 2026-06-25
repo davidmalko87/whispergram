@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whispergram"
-version = "0.8.0"
+version = "0.8.1"
 description = "Local, offline Telegram chat transcriber - voice & video via Whisper, screenshots via OCR, photos via a local vision model"
 readme = "README.md"
 license = "MIT"
