@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -147,6 +147,8 @@ def build_transcript(
     video_files: bool = False,
     describe: Optional[Describer] = None,
     photo_label: str = "text",
+    media_describe: Optional[Describer] = None,
+    describe_media: frozenset = frozenset(),
 ) -> Tuple[List[str], Counter]:
     """Turn Telegram messages into merged transcript lines, chronological order preserved.
 
@@ -201,6 +203,21 @@ def build_transcript(
                     stats["described"] += 1
                     continue
             # photo missing or nothing extracted -> fall through to the plain (photo) marker
+
+        if media_describe is not None and media_type in describe_media:
+            file_field = msg.get("file") or ""
+            media_path = os.path.join(export_dir, file_field)
+            if file_field and not is_missing_media(file_field, media_path):
+                extracted = media_describe(media_path).strip()
+                if extracted:
+                    marker = media_marker(msg)
+                    line = f"[{ts}] {who} ({marker}, described): {extracted}"
+                    if text:
+                        line += f" | caption: {text}"
+                    lines.append(line)
+                    stats["described"] += 1
+                    continue
+            # missing or nothing extracted -> fall through to the plain marker
 
         marker = media_marker(msg) if media_markers else ""
         if marker:
@@ -383,6 +400,26 @@ def make_ocr(lang: str) -> Describer:
     return describe
 
 
+def _extract_frames(path: str, max_frames: int) -> list:
+    """Return PIL frames from a media file: one for stills, up to *max_frames* evenly sampled
+    (in order) for videos/GIFs (.mp4/.webm/...). Used so describers can caption animations.
+    """
+    from PIL import Image
+
+    if os.path.splitext(path)[1].lower() in (".mp4", ".webm", ".mov", ".mkv", ".gif"):
+        import av
+
+        frames = [f.to_image() for f in av.open(path).decode(video=0)]
+        if not frames:
+            return []
+        if max_frames <= 1:
+            return [frames[len(frames) // 2]]
+        n = min(max_frames, len(frames))
+        idxs = sorted({round(i * (len(frames) - 1) / (n - 1)) for i in range(n)})
+        return [frames[i] for i in idxs]
+    return [Image.open(path).convert("RGB")]
+
+
 def make_describer(
     model_id: str = "Salesforce/blip-image-captioning-large",
 ) -> Optional[Describer]:
@@ -448,6 +485,84 @@ def make_describer(
     return describe
 
 
+def make_hq_describer(
+    model_id: str = "Qwen/Qwen2-VL-2B-Instruct",
+    max_frames: int = 6,
+) -> Optional[Describer]:
+    """High-quality scene captioner (Qwen2-VL) - single frame for stills, multi-frame for GIFs.
+
+    Far better than BLIP on cartoons, characters and *actions* (it reads the motion across frames),
+    but it is heavier (~4.4 GB) and slow on CPU - fast on a CUDA GPU. Opt-in via
+    ``pip install whispergram[describe-hq]`` + ``--describe-hq``. Returns ``None`` if the deps are
+    missing, and degrades to a marker if the model can't load. Captions are still best-effort - a
+    grounded guess, never literal fact.
+    """
+    try:
+        import torch
+        from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
+    except ImportError:
+        print(
+            "Note: high-quality captions need `pip install whispergram[describe-hq]`; "
+            "media shown as plain markers (or drop --describe-hq for the lighter describer)."
+        )
+        return None
+
+    state: dict = {}
+    cache: dict = {}
+
+    def describe(path: str) -> str:
+        if path in cache:
+            return cache[path]
+        if state.get("disabled"):
+            return ""
+        if "model" not in state:  # lazy one-time load on the first media item
+            try:
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                print(f"Describer (HQ): {model_id} on {device} (loads/downloads on first use)")
+                state["proc"] = AutoProcessor.from_pretrained(
+                    model_id, min_pixels=128 * 28 * 28, max_pixels=384 * 28 * 28)
+                model = Qwen2VLForConditionalGeneration.from_pretrained(
+                    model_id, torch_dtype=torch.float32)
+                state["model"] = model.to(device).eval()
+                state["device"] = device
+            except Exception as exc:
+                print(f"Note: HQ captioning disabled ({type(exc).__name__}); using markers.")
+                state["disabled"] = True
+                return ""
+        print(f"  describing {os.path.basename(path)} ...")
+        try:
+            frames = _extract_frames(path, max_frames)
+            if not frames:
+                caption = ""
+            else:
+                proc = state["proc"]
+                if len(frames) > 1:
+                    prompt = ("These images are frames, in order, from a short animation. "
+                              "Concisely describe in one sentence the main subject, what they "
+                              "are wearing, the action, and any visible setting or sign. Only "
+                              "describe what is clearly visible; do not invent details.")
+                else:
+                    prompt = ("Concisely describe in one sentence the main subject, what they are "
+                              "wearing, and what they are doing. Only describe what is clearly "
+                              "visible; do not invent details.")
+                content = [{"type": "image"} for _ in frames] + [{"type": "text", "text": prompt}]
+                text = proc.apply_chat_template(
+                    [{"role": "user", "content": content}],
+                    tokenize=False, add_generation_prompt=True)
+                inputs = proc(text=[text], images=frames, return_tensors="pt").to(state["device"])
+                with torch.no_grad():
+                    ids = state["model"].generate(**inputs, max_new_tokens=90, do_sample=False)
+                trimmed = ids[0][len(inputs.input_ids[0]):]
+                caption = proc.decode(trimmed, skip_special_tokens=True).strip()
+        except Exception as exc:
+            print(f"    describe failed on {os.path.basename(path)}: {exc}")
+            caption = ""
+        cache[path] = " ".join(caption.split())
+        return cache[path]
+
+    return describe
+
+
 # --------------------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------------------
@@ -480,6 +595,9 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     ap.add_argument("--describe-model", default="Salesforce/blip-image-captioning-large",
                     help="BLIP captioning model id (default: blip-large; "
                          "use ...-base for faster/lighter)")
+    ap.add_argument("--describe-hq", action="store_true",
+                    help="HQ describer (Qwen2-VL); also captions stickers + GIFs. "
+                         "Heavier; needs `pip install whispergram[describe-hq]`")
     ap.add_argument("--offline", action="store_true",
                     help="use only already-downloaded models and make zero network calls")
     ap.add_argument("--no-media-markers", action="store_true",
@@ -532,12 +650,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         model = load_model(args.model, args.device)
         transcribe = make_transcriber(model, args.lang)
         if not args.no_describe:
-            # None (with a hint) if the [describe] extra isn't installed
-            describer = make_describer(args.describe_model)
+            # None (with a hint) if the relevant describe extra isn't installed
+            describer = (make_hq_describer() if args.describe_hq
+                         else make_describer(args.describe_model))
         if args.ocr:
             ocr = make_ocr(args.ocr_lang)
 
     describe, photo_label = _photo_reader(describer, ocr)
+    # --describe-hq also captions stickers + GIFs (via the raw, OCR-free describer)
+    media_describe = describer if args.describe_hq else None
+    describe_media = frozenset({"sticker", "animation"}) if args.describe_hq else frozenset()
 
     with open(json_path, encoding="utf-8") as fh:
         data = json.load(fh)
@@ -551,6 +673,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         video_files=args.video_files,
         describe=describe,
         photo_label=photo_label,
+        media_describe=media_describe,
+        describe_media=describe_media,
     )
 
     with open(out_path, "w", encoding="utf-8") as fh:

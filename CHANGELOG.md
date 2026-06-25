@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.0] - 2026-06-25
+
+### Added
+- **`--describe-hq`** — a high-quality describer (Qwen2-VL-2B) that is far better than BLIP on
+  cartoons, characters and *actions*, and that **also captions stickers and GIFs/animations**.
+  GIFs/animations are read **multi-frame** (several evenly-sampled frames), so it captures the
+  motion rather than guessing from one still. Renders as `(animation, described): ...` and
+  `(sticker 😅, described): ...`. Opt-in via `pip install whispergram[describe-hq]`. Heavier
+  (~4.4 GB) and slow on CPU; fast on a CUDA GPU. Verified end-to-end on a real sticker + GIF with
+  torch 2.12 + transformers 5.12.
+
+### Changed
+- `build_transcript` gained `media_describe` / `describe_media` to caption non-photo media; the
+  default behaviour (BLIP, photos only) is unchanged. The lighter default describer stays BLIP.
+
+---
+
 ## [0.4.2] - 2026-06-25
 
 ### Added
