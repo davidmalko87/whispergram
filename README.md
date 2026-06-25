@@ -171,6 +171,24 @@ Markers can be turned off with `--no-media-markers` (voice/video notes are alway
 
 ---
 
+## Describe modes: photos, stickers & GIFs
+
+Image captioning is opt-in via an extra, in three modes:
+
+| Mode | How to enable | What it captions | Model | Size | Speed |
+|---|---|---|---|---|---|
+| **Off** | `--no-describe` | nothing (media shown as markers) | — | — | instant |
+| **Default** | `pip install whispergram[describe]` | **photos** | BLIP-large | ~1.9 GB | fast on CPU |
+| **High-quality** | `pip install whispergram[describe-hq]` + `--describe-hq` | **photos + stickers + GIFs** (GIFs multi-frame) | Qwen2-VL-2B | ~4.4 GB | slow on CPU / fast on GPU |
+
+- **Default (BLIP)** gives a short scene gist for photos — fine for real photos, rough on cartoons.
+- **`--describe-hq` (Qwen2-VL)** is markedly better on cartoons, characters and *actions*, and is the
+  only mode that also describes **stickers and GIFs** (reading several frames so it catches motion).
+- Add `--ocr` to also pull any in-image text. Everything is local; captions are best-effort, never
+  literal fact. To run the models on your GPU, see [GPU setup](#gpu-cuda-setup).
+
+---
+
 ## ✅ Round-trip Validated
 
 The merge has been **validated against a real 770-message Telegram export** (a live, audio-heavy
@@ -270,6 +288,17 @@ whispergram --out result.md                       # custom output path
 
 > CTranslate2 loads cuBLAS/cuDNN lazily in native code that ignores `os.add_dll_directory`,
 > which is why placing the DLLs inside the package dir is the dependable solution.
+
+**GPU for photo/sticker/GIF captions is separate from Whisper's.** The describe models (BLIP /
+Qwen2-VL) use PyTorch, and `pip install` fetches the **CPU** build by default — so captioning runs on
+the CPU even when Whisper is on your GPU. For fast captioning (especially `--describe-hq`), install a
+CUDA build of torch:
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # match your CUDA
+```
+
+whispergram auto-detects CUDA and moves the caption model to the GPU — no flag needed.
 
 ---
 
