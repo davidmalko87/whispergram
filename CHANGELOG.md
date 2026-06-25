@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.8.2] - 2026-06-26
+
+### Fixed
+- **`--ocr` now finds Tesseract automatically on Windows** even when it isn't on PATH (the
+  UB-Mannheim installer doesn't add it) — checks the standard `C:\Program Files\Tesseract-OCR`
+  locations. OCR still needs the language packs for your `--ocr-lang` (e.g. `ukr`, `rus`).
+- OCR failures are reported **once** instead of once per photo, so a misconfigured Tesseract no
+  longer floods the output (photos are still scene-described regardless).
+
+---
+
 ## [0.8.1] - 2026-06-26
 
 ### Fixed

@@ -947,6 +947,21 @@ def test_is_describable():
     assert whispergram._is_describable("x/sticker.webp") is True
 
 
+def test_find_tesseract(monkeypatch):
+    from whispergram import _find_tesseract
+    # already on PATH -> None (pytesseract's default discovery is fine)
+    monkeypatch.setattr(whispergram.shutil, "which", lambda _n: "C:/x/tesseract.exe")
+    assert _find_tesseract() is None
+    # not on PATH but present at the standard install location -> return that path
+    monkeypatch.setattr(whispergram.shutil, "which", lambda _n: None)
+    std = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    monkeypatch.setattr(whispergram.os.path, "isfile", lambda p: p == std)
+    assert _find_tesseract() == std
+    # not on PATH and nowhere standard -> None
+    monkeypatch.setattr(whispergram.os.path, "isfile", lambda _p: False)
+    assert _find_tesseract() is None
+
+
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)

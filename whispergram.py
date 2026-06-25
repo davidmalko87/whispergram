@@ -19,11 +19,12 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -527,12 +528,28 @@ def make_transcriber(model, lang: Optional[str], batch_size: int = 0) -> Transcr
     return transcribe
 
 
+def _find_tesseract() -> Optional[str]:
+    """Locate the Tesseract binary when it isn't on PATH (the UB-Mannheim Windows installer
+    doesn't add it). Returns a path to use as pytesseract's ``tesseract_cmd``, or ``None`` if it's
+    already on PATH (or nowhere obvious)."""
+    if shutil.which("tesseract"):
+        return None  # already discoverable
+    for cand in (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+    ):
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
 def make_ocr(lang: str) -> Describer:
     """Build a caching OCR ``describe(image_path) -> text`` closure (local Tesseract).
 
-    The result is collapsed to a single line. Needs the Tesseract binary on PATH plus the
-    language data packs for *lang* (e.g. ``ukr``, ``rus``); install the Python deps with
-    ``pip install whispergram[ocr]``. A photo Tesseract cannot read returns ``""``.
+    The result is collapsed to a single line. Needs the Tesseract binary (auto-found on Windows if
+    not on PATH) plus the language data packs for *lang* (e.g. ``ukr``, ``rus``); install the Python
+    deps with ``pip install whispergram[ocr]``. A photo Tesseract cannot read returns ``""``.
     """
     try:
         import pytesseract
@@ -540,17 +557,25 @@ def make_ocr(lang: str) -> Describer:
     except ImportError:
         sys.exit(
             "OCR needs pytesseract + Pillow: `pip install whispergram[ocr]`, and the Tesseract "
-            "binary on PATH (with language packs, e.g. ukr/rus). Or drop --ocr."
+            "binary (with language packs, e.g. ukr/rus). Or drop --ocr."
         )
 
+    found = _find_tesseract()
+    if found:
+        pytesseract.pytesseract.tesseract_cmd = found
+
     cache: dict = {}
+    warned = {"done": False}
 
     def describe(path: str) -> str:
         if path not in cache:
             try:
                 raw = pytesseract.image_to_string(Image.open(path), lang=lang)
             except Exception as exc:
-                print(f"    OCR failed on {os.path.basename(path)}: {exc}")
+                if not warned["done"]:  # report the cause once, not per photo
+                    print(f"    OCR unavailable ({exc}); photos are still scene-described, "
+                          f"OCR text skipped.")
+                    warned["done"] = True
                 raw = ""
             cache[path] = " ".join(raw.split())
         return cache[path]
