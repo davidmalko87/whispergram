@@ -382,6 +382,54 @@ def test_photo_unchanged_without_describer():
     assert lines == ["[2026-06-20 10:00] A (photo): hi"]
 
 
+# --- HQ media describe: stickers + animations (the --describe-hq path) ----------------
+def test_media_describe_sticker(tmp_path):
+    (tmp_path / "stickers").mkdir()
+    (tmp_path / "stickers" / "s.webp").write_bytes(b"x")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "media_type": "sticker", "sticker_emoji": ":)", "file": "stickers/s.webp"}]
+    lines, stats = build_transcript(
+        messages, str(tmp_path), fake_transcribe,
+        media_describe=fake_describe, describe_media=frozenset({"sticker"}))
+    assert lines == ["[2026-06-20 10:00] A (sticker :), described): <ocr of s.webp>"]
+    assert stats["described"] == 1
+
+
+def test_media_describe_animation(tmp_path):
+    (tmp_path / "video_files").mkdir()
+    (tmp_path / "video_files" / "g.mp4").write_bytes(b"x")
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "media_type": "animation", "file": "video_files/g.mp4"}]
+    lines, _ = build_transcript(
+        messages, str(tmp_path), fake_transcribe,
+        media_describe=fake_describe, describe_media=frozenset({"animation"}))
+    assert lines == ["[2026-06-20 10:00] A (animation, described): <ocr of g.mp4>"]
+
+
+def test_media_describe_off_by_default():
+    """Without describe_media, stickers/animations stay plain markers (default behaviour)."""
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "media_type": "sticker", "sticker_emoji": ":)"}]
+    lines, _ = build_transcript(messages, ".", fake_transcribe, media_describe=fake_describe)
+    assert lines == ["[2026-06-20 10:00] A (sticker :))"]
+
+
+def test_media_describe_missing_file_not_called():
+    calls = []
+
+    def spy(path):
+        calls.append(path)
+        return "x"
+
+    messages = [{"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+                 "media_type": "animation",
+                 "file": "(File not included. Change data exporting settings to download.)"}]
+    lines, _ = build_transcript(messages, ".", fake_transcribe,
+                                media_describe=spy, describe_media=frozenset({"animation"}))
+    assert calls == []
+    assert lines == ["[2026-06-20 10:00] A (animation [not exported])"]
+
+
 # --- _photo_reader: composing scene-describe (--describe) with OCR (--ocr) -------------
 def test_photo_reader_describe_only():
     fn, label = _photo_reader(lambda p: "a cat on a sofa", None)

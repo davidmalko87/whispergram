@@ -57,7 +57,7 @@ search, or feed to a model.
 | **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
 | **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
 | **Photo descriptions** | Photos are captioned automatically by a local model (BLIP) when `whispergram[describe]` is installed — `--no-describe` to skip |
-| **Tested** | 59 offline tests on the Python 3.9–3.13 CI matrix |
+| **Tested** | 64 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -165,6 +165,7 @@ The result is `merged_chat.md` in the export folder.
 | Photo (default, `[describe]` installed) | `[time] sender (photo, described): a caption of the scene` |
 | Photo + `--ocr` | `[time] sender (photo, described): <scene> \| text: <text found in the image>` |
 | Photo + `--ocr --no-describe` | `[time] sender (photo, text): <text found in the image>` |
+| Sticker / GIF + `--describe-hq` | `[time] sender (sticker 😅, described): …` · `(animation, described): …` |
 
 Markers can be turned off with `--no-media-markers` (voice/video notes are always transcribed).
 
@@ -207,6 +208,7 @@ of effort in the tool:
 | Music / `audio_file` | Off by default | Opt in with `--audio-files`; songs are otherwise not run through ASR |
 | Photo OCR | Text-in-image only | `--ocr` reads visible text (great for screenshots), not a description of the scene; needs Tesseract + language packs |
 | Photo descriptions | Best-effort, local | On by default with `whispergram[describe]` (BLIP via transformers) — captions are a short, English scene *gist*, not literal fact; `--no-describe` to skip |
+| Stickers / GIFs / cartoons | `--describe-hq` only | Local models caption cartoons/memes roughly; `--describe-hq` (Qwen2-VL, multi-frame for GIFs) is much better but heavier — still best-effort, never exact |
 | Speaker labels | Sender only | Each note is attributed to its Telegram sender; no in-audio diarization |
 | Timestamps | Minute resolution | Telegram exports `YYYY-MM-DDThh:mm`; seconds are not shown |
 | Reactions / edits / replies | Not represented | The merged file is a clean reading transcript, not a full forensic dump |
@@ -224,6 +226,7 @@ whispergram --audio-files                         # also transcribe music/long a
 whispergram --video-files                         # also transcribe regular videos' audio
 whispergram --ocr --ocr-lang ukr+rus+eng          # read text from photos (local Tesseract)
 whispergram --no-describe                         # skip photo scene captions
+whispergram --describe-hq                         # better captions + describe stickers/GIFs (Qwen2-VL)
 whispergram --offline                             # zero network calls (use cached models only)
 whispergram --out result.md                       # custom output path
 ```
@@ -240,6 +243,7 @@ whispergram --out result.md                       # custom output path
 | `--ocr-lang` | `eng` | Tesseract language(s), e.g. `ukr+rus+eng` |
 | `--no-describe` | off | skip photo scene captions (on by default when `[describe]` is installed) |
 | `--describe-model` | `blip-large` | BLIP caption model id; use `...-base` for faster/lighter |
+| `--describe-hq` | off | high-quality describer (Qwen2-VL) + captions stickers/GIFs; needs `[describe-hq]` |
 | `--offline` | off | use only cached models; make zero network calls |
 | `--no-media-markers` | off | omit `(sticker)` / `(photo)` / `(file)` markers |
 | `--dry-run` | off | map the chat without loading a model or transcribing |
@@ -301,6 +305,12 @@ are a short, English, best-effort gist. Pass `--no-describe` to turn it off, or 
 Salesforce/blip-image-captioning-base` for a faster/lighter model. The BLIP-large model (~1.9 GB)
 downloads once on the first photo, then stays offline.
 
+**Can it describe stickers and GIFs too?**
+Yes, with `--describe-hq` (`pip install whispergram[describe-hq]`). That switches to a stronger model
+(Qwen2-VL) that's much better on cartoons and *actions*, and it reads GIFs **multi-frame** to catch
+the motion — e.g. `(animation, described): a character in a suit walking into an arena`. It's heavier
+(~4.4 GB; slow on CPU, fast on GPU), and cartoon/meme captions are still best-effort, never exact.
+
 **Which languages work?**
 Any language Whisper supports. `large-v3` handles Ukrainian and Russian well; use `--lang uk` (or
 `ru`, `en`, …) to force one if auto-detection slips.
@@ -331,7 +341,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 59 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 64 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)
@@ -364,6 +374,7 @@ sensitive as the audio. Two rules:
 - For NVIDIA GPU on Windows: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `ctranslate2>=4.5`
 - For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install whispergram[ocr]`
 - For photo descriptions (optional): `pip install whispergram[describe]` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1.9 GB BLIP-large model downloads once on the first photo, then runs offline. Use `--describe-model Salesforce/blip-image-captioning-base` for a lighter model, or `--no-describe` to turn it off
+- For high-quality captions + sticker/GIF describe (optional): `pip install whispergram[describe-hq]` (adds `torchvision`) and pass `--describe-hq`. Uses Qwen2-VL (~4.4 GB, slow on CPU / fast on GPU)
 
 > The test suite needs none of the above — only `ruff` and `pytest`.
 
