@@ -130,6 +130,23 @@ whispergram "path/to/ChatExport_2026-06-20"
 
 The result is `merged_chat.md` in the export folder.
 
+### Best quality (use your GPU)
+
+Audio and video already use the most accurate model — Whisper **large-v3** — on your GPU by default.
+For the best **photo, sticker and GIF** captions too, install the HQ extra, put torch on the GPU, and
+add `--describe-hq`:
+
+```bash
+pip install -U "whispergram[describe-hq]"
+# one-time, for GPU speed (match your CUDA version, e.g. cu121/cu124):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+whispergram --describe-hq          # add --ocr --ocr-lang ukr+rus+eng to also read screenshot text
+```
+
+That runs **large-v3** (audio/video) + **Qwen2-VL** (photos, stickers, GIFs), all on the GPU. Without
+`--describe-hq`, the lighter BLIP describer captions photos only, and on CPU. See
+[Describe modes](#describe-modes-photos-stickers--gifs) for the trade-offs.
+
 ---
 
 ## Example output
