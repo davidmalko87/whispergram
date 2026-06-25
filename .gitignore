@@ -12,6 +12,10 @@ merged_chat.md
 merged_*.md
 *_chat.md
 *.transcript.md
+.whispergram_cache.json
+# Saved Claude Code session transcripts (may contain pasted private chat content)
+whispergram-session*.md
+*-session-*.md
 voice_messages/
 video_files/
 stickers/

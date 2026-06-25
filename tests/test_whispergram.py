@@ -15,8 +15,14 @@ import pytest
 import whispergram
 from whispergram import (
     __version__,
+    _Cache,
+    _cache_key,
+    _dedupe_output,
     _photo_reader,
+    _safe_name,
+    _with_cache,
     build_transcript,
+    count_jobs,
     extract_text,
     find_json,
     is_missing_media,
@@ -578,6 +584,285 @@ def test_configure_hf_env(monkeypatch):
 
 
 # --- metadata -------------------------------------------------------------------------
+# --- resume cache + progress total + queue (v0.7.0) -----------------------------------
+def test_cache_persists_and_reloads(tmp_path):
+    p = str(tmp_path / ".whispergram_cache.json")
+    _Cache(p).put("k1", "hello")          # write + flush
+    c = _Cache(p)
+    c.put("k2", "world")
+    fresh = _Cache(p)                     # a later run reads what was flushed -> resume
+    assert fresh.get("k1") == "hello"
+    assert fresh.get("k2") == "world"
+    assert fresh.get("missing") is None
+
+
+def test_cache_none_path_is_memory_only():
+    c = _Cache(None)
+    c.put("k", "v")
+    assert c.get("k") == "v"  # works in-memory; nothing persisted
+
+
+def test_with_cache_skips_recompute(tmp_path):
+    calls = []
+
+    def fn(path):
+        calls.append(path)
+        return f"<{os.path.basename(path)}>"
+
+    a = str(tmp_path / "a.ogg")
+    (tmp_path / "a.ogg").write_bytes(b"x")
+    cpath = str(tmp_path / "c.json")
+    wrapped = _with_cache(fn, _Cache(cpath), "whisper:large-v3:None", str(tmp_path))
+    assert wrapped(a) == "<a.ogg>"
+    assert wrapped(a) == "<a.ogg>"
+    assert calls == [a]  # computed once; second call served from cache
+
+    calls.clear()  # a NEW run with a reloaded cache also skips recompute (resume)
+    wrapped2 = _with_cache(fn, _Cache(cpath), "whisper:large-v3:None", str(tmp_path))
+    assert wrapped2(a) == "<a.ogg>"
+    assert calls == []
+
+
+def test_with_cache_none_disables():
+    def fn(_p):
+        return "x"
+    assert _with_cache(fn, None, "eng", ".") is fn  # no cache -> passthrough
+
+
+def test_with_cache_skips_empty_results(tmp_path):
+    """A failed/disabled describer returns '' - that must NOT be cached, or a later run with a
+    working model would forever read the empty hit and never re-caption the file."""
+    state = {"working": False}
+
+    def fn(_path):
+        return "a real caption" if state["working"] else ""
+
+    img = str(tmp_path / "p.jpg")
+    (tmp_path / "p.jpg").write_bytes(b"x")
+    cpath = str(tmp_path / "c.json")
+    w1 = _with_cache(fn, _Cache(cpath), "photo:eng", str(tmp_path))
+    assert w1(img) == ""  # model disabled this run; nothing persisted
+
+    state["working"] = True  # next run, model works -> must recompute, not serve the empty ""
+    w2 = _with_cache(fn, _Cache(cpath), "photo:eng", str(tmp_path))
+    assert w2(img) == "a real caption"
+
+
+def test_cache_key_distinguishes_subfolders(tmp_path):
+    """Same basename + same size in different Telegram subfolders must not collide."""
+    for sub in ("voice_messages", "round_video_messages"):
+        (tmp_path / sub).mkdir()
+        (tmp_path / sub / "a.ogg").write_bytes(b"1234")  # identical name and size
+    k1 = _cache_key("whisper:x", str(tmp_path / "voice_messages" / "a.ogg"), str(tmp_path))
+    k2 = _cache_key("whisper:x", str(tmp_path / "round_video_messages" / "a.ogg"), str(tmp_path))
+    assert k1 != k2
+
+
+def test_count_jobs_matches_on_job(tmp_path):
+    (tmp_path / "voice_messages").mkdir()
+    (tmp_path / "voice_messages" / "a.ogg").write_bytes(b"x")
+    (tmp_path / "photos").mkdir()
+    (tmp_path / "photos" / "p.jpg").write_bytes(b"x")
+    messages = [
+        {"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+         "media_type": "voice_message", "file": "voice_messages/a.ogg"},
+        {"type": "message", "date": "2026-06-20T10:01:00", "from": "A", "photo": "photos/p.jpg"},
+        {"type": "message", "date": "2026-06-20T10:02:00", "from": "A",
+         "text_entities": [{"type": "plain", "text": "hi"}]},
+        {"type": "message", "date": "2026-06-20T10:03:00", "from": "A",
+         "media_type": "voice_message",
+         "file": "(File not included. Change data exporting settings to download.)"},
+    ]
+    total = count_jobs(messages, str(tmp_path), describe_photos=True)
+    calls = []
+    build_transcript(messages, str(tmp_path), fake_transcribe, describe=fake_describe,
+                     on_job=lambda label: calls.append(label))
+    assert total == len(calls) == 2  # present voice + photo; missing voice + text excluded
+
+
+def test_safe_name():
+    out = _safe_name('Anastasia / Tinder: <work>')
+    assert not any(c in out for c in '<>:"/\\|?*')
+    assert _safe_name("") == "chat"
+    assert _safe_name(None) == "chat"
+
+
+def test_main_queue_two_folders(tmp_path):
+    for sub, name in (("a", "Alice"), ("b", "Bob")):
+        d = tmp_path / sub
+        d.mkdir()
+        (d / "result.json").write_text(json.dumps({"name": name, "messages": [
+            {"type": "message", "date": "2026-06-20T10:00:00", "from": "X",
+             "text_entities": [{"type": "plain", "text": "hi"}]}]}))
+    out_dir = tmp_path / "merged"
+    main(["--dry-run", "--no-describe", str(tmp_path / "a"), str(tmp_path / "b"),
+          "--out-dir", str(out_dir)])
+    assert (out_dir / "Alice.md").read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] X: hi"
+    assert (out_dir / "Bob.md").read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] X: hi"
+
+
+def _write_export(folder, chat_name, text):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "result.json").write_text(json.dumps({"name": chat_name, "messages": [
+        {"type": "message", "date": "2026-06-20T10:00:00", "from": "X",
+         "text_entities": [{"type": "plain", "text": text}]}]}))
+
+
+def test_dedupe_output_avoids_overwrite(tmp_path):
+    used = set()
+    a = str(tmp_path / "Work.md")
+    b = str(tmp_path / "Work.md")
+    assert _dedupe_output(a, used) == a              # first claim keeps the name
+    assert _dedupe_output(b, used) == str(tmp_path / "Work (2).md")  # second is disambiguated
+    assert _dedupe_output(b, used) == str(tmp_path / "Work (3).md")  # and again
+
+
+def test_main_out_dir_same_chat_name_no_data_loss(tmp_path):
+    """Two folders whose chats share a name must NOT clobber each other in --out-dir."""
+    _write_export(tmp_path / "a", "Work", "from A")
+    _write_export(tmp_path / "b", "Work", "from B")
+    out_dir = tmp_path / "merged"
+    rc = main(["--dry-run", "--no-describe", str(tmp_path / "a"), str(tmp_path / "b"),
+               "--out-dir", str(out_dir)])
+    assert rc == 0
+    assert "from A" in (out_dir / "Work.md").read_text(encoding="utf-8")
+    assert "from B" in (out_dir / "Work (2).md").read_text(encoding="utf-8")
+
+
+def test_main_queue_continues_after_bad_folder(tmp_path):
+    """A corrupt export must not abort the queue; good folders still run, exit code is non-zero."""
+    _write_export(tmp_path / "good1", "G1", "one")
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad" / "result.json").write_text("{ this is not valid json ")
+    _write_export(tmp_path / "good2", "G2", "two")
+    out_dir = tmp_path / "merged"
+    rc = main(["--dry-run", "--no-describe",
+               str(tmp_path / "good1"), str(tmp_path / "bad"), str(tmp_path / "good2"),
+               "--out-dir", str(out_dir)])
+    assert rc == 1  # the bad folder is reported as a failure
+    assert "one" in (out_dir / "G1.md").read_text(encoding="utf-8")   # folder before the bad one
+    assert "two" in (out_dir / "G2.md").read_text(encoding="utf-8")   # AND the one after it
+
+
+def test_out_and_out_dir_mutually_exclusive(tmp_path):
+    _write_export(tmp_path / "a", "A", "hi")
+    with pytest.raises(SystemExit):
+        main(["--dry-run", "--no-describe", str(tmp_path / "a"),
+              "--out", str(tmp_path / "x.md"), "--out-dir", str(tmp_path / "out")])
+
+
+# --- round-trip: rich export -> full pipeline -> exact diff -> prove resume ------------
+# The transcriber/describer can't run offline, so they are injected as deterministic, call-
+# counting fakes. Everything else (cache, queue, progress, output, every media branch) is the
+# real code path. This is the "only a verified round-trip counts" check: build a chat that uses
+# every documented media type, run whispergram for real, and diff the merged file line-for-line.
+_RICH_MESSAGES = [
+    {"date": "2026-06-20T12:00:00", "from": "Alex", "text": "hello"},
+    {"date": "2026-06-20T12:01:00", "from": "Alex", "media_type": "voice_message",
+     "file": "voice_messages/v1.ogg", "duration_seconds": 6},
+    {"date": "2026-06-20T12:02:00", "from": "You", "media_type": "video_message",
+     "file": "round_video_messages/r1.mp4", "duration_seconds": 8},
+    {"date": "2026-06-20T12:03:00", "from": "Alex", "media_type": "audio_file",
+     "file": "files/song.mp3", "duration_seconds": 200},
+    {"date": "2026-06-20T12:04:00", "from": "You", "media_type": "video_file",
+     "file": "video_files/clip.mp4", "duration_seconds": 12},
+    {"date": "2026-06-20T12:05:00", "from": "Alex", "photo": "photos/p.jpg", "text": "whiteboard"},
+    {"date": "2026-06-20T12:06:00", "from": "You", "media_type": "sticker",
+     "file": "stickers/s.webp"},
+    {"date": "2026-06-20T12:07:00", "from": "Alex", "media_type": "animation",
+     "file": "files/g.mp4"},
+    {"date": "2026-06-20T12:08:00", "from": "You", "media_type": "voice_message",
+     "file": "(File not included. Change data exporting settings to download.)",
+     "duration_seconds": 3},
+    {"date": "2026-06-20T12:09:00", "from": "Alex", "text": "bye"},
+]
+
+_RICH_EXPECTED = [
+    "[2026-06-20 12:00] Alex: hello",
+    "[2026-06-20 12:01] Alex (voice 6s): <t:v1.ogg>",
+    "[2026-06-20 12:02] You (video-note 8s): <t:r1.mp4>",
+    "[2026-06-20 12:03] Alex (audio 200s): <t:song.mp3>",
+    "[2026-06-20 12:04] You (video 12s): <t:clip.mp4>",
+    "[2026-06-20 12:05] Alex (photo, described): <d:p.jpg> | caption: whiteboard",
+    "[2026-06-20 12:06] You (sticker, described): <d:s.webp>",
+    "[2026-06-20 12:07] Alex (animation, described): <d:g.mp4>",
+    "[2026-06-20 12:08] You (voice 3s): [not exported]",
+    "[2026-06-20 12:09] Alex: bye",
+]
+
+
+def _build_rich_export(folder):
+    """Write the rich export + every referenced media file so is_missing_media() sees them."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for msg in _RICH_MESSAGES:
+        ref = msg.get("file") or msg.get("photo") or ""
+        if ref and "(" not in ref:  # skip the not-exported placeholder
+            f = folder / ref
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(b"media-bytes")
+    messages = [
+        {"type": "message", **m,
+         **({"text_entities": [{"type": "plain", "text": m["text"]}]} if "text" in m else {})}
+        for m in _RICH_MESSAGES
+    ]
+    for m in messages:
+        m.pop("text", None)
+    (folder / "result.json").write_text(
+        json.dumps({"name": "Rich Chat", "messages": messages}), encoding="utf-8")
+
+
+def _inject_fake_models(monkeypatch, t_calls, d_calls):
+    """Replace the heavy factories with deterministic, call-recording fakes (HQ path: the
+    describer also captions stickers/GIFs, so all three model-call sites are exercised)."""
+    def fake_t(path):
+        t_calls.append(os.path.basename(path))
+        return f"<t:{os.path.basename(path)}>"
+
+    def fake_d(path):
+        d_calls.append(os.path.basename(path))
+        return f"<d:{os.path.basename(path)}>"
+
+    monkeypatch.setattr(whispergram, "load_model", lambda *a, **k: object())
+    monkeypatch.setattr(whispergram, "make_transcriber", lambda *a, **k: fake_t)
+    monkeypatch.setattr(whispergram, "_hq_available", lambda: True)
+    monkeypatch.setattr(whispergram, "make_hq_describer", lambda *a, **k: fake_d)
+
+
+def test_round_trip_every_media_type(tmp_path, monkeypatch):
+    export = tmp_path / "ChatExport"
+    _build_rich_export(export)
+    out = tmp_path / "merged.md"
+    t_calls, d_calls = [], []
+    _inject_fake_models(monkeypatch, t_calls, d_calls)
+
+    rc = main(["--audio-files", "--video-files", str(export), "--out", str(out)])
+
+    assert rc == 0
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines == _RICH_EXPECTED                       # exact line-for-line fidelity
+    assert t_calls == ["v1.ogg", "r1.mp4", "song.mp3", "clip.mp4"]  # 4 present, missing skipped
+    assert d_calls == ["p.jpg", "s.webp", "g.mp4"]       # photo + sticker + animation
+
+
+def test_round_trip_resume_recomputes_nothing(tmp_path, monkeypatch):
+    """Second run over the same export must serve every item from the on-disk cache."""
+    export = tmp_path / "ChatExport"
+    _build_rich_export(export)
+    out = tmp_path / "merged.md"
+
+    t1, d1 = [], []
+    _inject_fake_models(monkeypatch, t1, d1)
+    main(["--audio-files", "--video-files", str(export), "--out", str(out)])
+    assert (t1, d1) != ([], [])                          # first run did the work
+    assert (export / ".whispergram_cache.json").exists()
+
+    t2, d2 = [], []                                      # a fresh run, fresh call recorders
+    _inject_fake_models(monkeypatch, t2, d2)
+    main(["--audio-files", "--video-files", str(export), "--out", str(out)])
+    assert t2 == [] and d2 == []                         # resume: nothing recomputed
+    assert out.read_text(encoding="utf-8").splitlines() == _RICH_EXPECTED  # identical output
+
+
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)

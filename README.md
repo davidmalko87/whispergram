@@ -57,7 +57,10 @@ search, or feed to a model.
 | **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
 | **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
 | **Photo descriptions** | Captioned automatically by the best installed local model — BLIP (`[describe]`) for photos, or Qwen2-VL (`[describe-hq]`) for photos + stickers + GIFs |
-| **Tested** | 66 offline tests on the Python 3.9–3.13 CI matrix |
+| **Resumable** | Progress is cached per file — close the terminal or crash, then re-run and it continues where it left off |
+| **Queue folders** | Transcribe many exports in one command (models load once); `--out-dir` collects the results |
+| **Progress bar** | Live `done/total` + ETA per folder |
+| **Round-trip verified** | A rich synthetic export runs through the full pipeline and is diffed line-for-line; 81 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -146,6 +149,29 @@ whispergram        # auto-uses large-v3 + Qwen2-VL; add --ocr --ocr-lang ukr+rus
 That runs **large-v3** (audio/video) + **Qwen2-VL** (photos, stickers, GIFs). ⚠️ **On Windows, a CUDA
 build of torch can clash with faster-whisper's GPU** (cuDNN) — see [GPU on Windows](#gpu-cuda-setup)
 for the two reliable setups before installing CUDA torch.
+
+### Queue & resume
+
+Pass **several export folders** to transcribe them back-to-back — the models load **once** and are
+reused, and sequential is safe for your GPU:
+
+```bash
+whispergram "ChatExport_Anastasia" "ChatExport_Olha" "ChatExport_Work" --out-dir "C:\merged"
+# -> C:\merged\Anastasia.md, C:\merged\Olha.md, C:\merged\Work.md
+```
+
+Runs are **resumable**: each transcript/caption is cached to `.whispergram_cache.json` in the export
+folder as it's produced, so if you close the terminal or it crashes, just **run it again** — finished
+files are skipped and it continues where it left off. A progress bar shows `done/total` + ETA:
+
+```
+ 60%|████████████        | 28/47 [02:14<01:31], audio_28.ogg
+```
+
+If two chats share a name, the second is saved as `Work (2).md` rather than overwriting the first,
+and a folder that fails (e.g. a corrupt export) is skipped so the rest of the queue still runs.
+`--no-cache` disables the cache; `--out FILE` sets a custom path for a single folder (it can't be
+combined with `--out-dir`).
 
 ---
 
@@ -274,7 +300,9 @@ whispergram --out result.md                       # custom output path
 | `--device` | `cuda` | `cuda` or `cpu`; auto-falls back to CPU if the GPU fails |
 | `--model` | `large-v3` | try `large-v3-turbo` or `medium` if CPU is slow |
 | `--lang` | auto | force a code like `uk`, `ru`, `en` if auto-detect mislabels |
-| `--out` | `merged_chat.md` | output file |
+| `--out` | `merged_chat.md` | output file for a **single** folder (mutually exclusive with `--out-dir`) |
+| `--out-dir` | off | collect each queued folder's transcript here as `<chat name>.md` |
+| `--no-cache` | off | don't read/write the per-folder `.whispergram_cache.json` resume cache |
 | `--audio-files` | off | also transcribe `audio_file` messages (music, long memos) |
 | `--video-files` | off | also transcribe regular video files' audio track |
 | `--ocr` | off | extract text from photos with local Tesseract OCR |
@@ -402,7 +430,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 66 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 81 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)
