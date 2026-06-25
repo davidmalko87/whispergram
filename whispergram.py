@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -488,13 +488,27 @@ def _with_cache(
     return wrapped
 
 
-def make_transcriber(model, lang: Optional[str]) -> Transcriber:
-    """Build a caching ``transcribe(path) -> text`` closure over a loaded model."""
+def make_transcriber(model, lang: Optional[str], batch_size: int = 0) -> Transcriber:
+    """Build a caching ``transcribe(path) -> text`` closure over a loaded model.
+
+    With ``batch_size`` > 1 the audio is decoded through faster-whisper's
+    ``BatchedInferencePipeline`` - several segments at once, a large speedup on a GPU. Each chunk
+    is decoded independently (no cross-segment context), a small quality trade-off, so the default
+    (``batch_size`` 0/1) keeps the sequential decode that's best for connected uk/ru speech.
+    """
     cache: dict = {}
+    batched = batch_size and batch_size > 1
+    if batched:
+        from faster_whisper import BatchedInferencePipeline
+        engine = BatchedInferencePipeline(model=model)
 
     def transcribe(path: str) -> str:
         if path not in cache:
-            segments, _ = model.transcribe(path, language=lang, vad_filter=True)
+            if batched:
+                segments, _ = engine.transcribe(path, language=lang, vad_filter=True,
+                                                batch_size=batch_size)
+            else:
+                segments, _ = model.transcribe(path, language=lang, vad_filter=True)
             cache[path] = " ".join(s.text.strip() for s in segments).strip() or "[no speech]"
         return cache[path]
 
@@ -723,6 +737,9 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
                     help="whisper model: large-v3, large-v3-turbo, medium ... (default: large-v3)")
     ap.add_argument("--lang", default=None,
                     help="force a language code (uk, ru, en ...); default: auto-detect")
+    ap.add_argument("--batch-size", type=int, default=0, metavar="N",
+                    help="batch audio segments for a big GPU speedup (try 8 or 16); needs a GPU. "
+                         "Default 0 = sequential, best quality (esp. uk/ru)")
     ap.add_argument("--out", default=None,
                     help="output file for a single folder (default: <export_dir>/merged_chat.md)")
     ap.add_argument("--out-dir", default=None,
@@ -828,7 +845,7 @@ def _process_export(export_dir, *, args, transcribe, describe, photo_label, medi
         print(f"  skip {export_dir}: no .json export found")
         return False
     json_path = find_json(export_dir)
-    with open(json_path, encoding="utf-8") as fh:
+    with open(json_path, encoding="utf-8-sig") as fh:  # utf-8-sig tolerates a leading BOM
         data = json.load(fh)
     messages = data.get("messages", [])
     out_path = _dedupe_output(_resolve_out(export_dir, data, args), used_outputs)
@@ -909,7 +926,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return "[dry-run - not read]"
     else:
         model = load_model(args.model, args.device)
-        transcribe = make_transcriber(model, args.lang)
+        transcribe = make_transcriber(model, args.lang, args.batch_size)
+        if args.batch_size and args.batch_size > 1:
+            note = "" if args.device == "cuda" else " (needs a GPU to actually help)"
+            print(f"Batched inference: batch_size={args.batch_size}{note}")
         if not args.no_describe:
             describer = make_hq_describer() if use_hq else make_describer(args.describe_model)
             if describer is None and use_hq:  # HQ deps present but load failed -> light fallback
