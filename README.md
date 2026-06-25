@@ -57,7 +57,7 @@ search, or feed to a model.
 | **Regular videos** | `--video-files` also transcribes ordinary video files' audio, not just round notes |
 | **Photo OCR** | `--ocr` pulls text out of photos with local Tesseract — great for screenshots |
 | **Photo descriptions** | Captioned automatically by the best installed local model — BLIP (`[describe]`) for photos, or Qwen2-VL (`[describe-hq]`) for photos + stickers + GIFs |
-| **Tested** | 65 offline tests on the Python 3.9–3.13 CI matrix |
+| **Tested** | 66 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -402,7 +402,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 65 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 66 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

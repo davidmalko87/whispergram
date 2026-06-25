@@ -581,3 +581,13 @@ def test_configure_hf_env(monkeypatch):
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
+
+
+def test_version_matches_pyproject():
+    """__version__ and pyproject's version must stay in lockstep (the publish workflow + build
+    rely on it)."""
+    import re
+    pyproject = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
+    with open(pyproject, encoding="utf-8") as fh:
+        match = re.search(r'^version = "([^"]+)"', fh.read(), re.MULTILINE)
+    assert match and match.group(1) == __version__
