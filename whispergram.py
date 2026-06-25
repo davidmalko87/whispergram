@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -343,6 +343,15 @@ def load_model(model_name: str, device: str):
             "faster-whisper is not installed. Run `pip install -r requirements.txt`, "
             "or use --dry-run to preview the merge without transcribing."
         )
+    except OSError as exc:
+        sys.exit(
+            "Failed to load faster-whisper's CUDA libraries - usually a PyTorch/CUDA clash on "
+            f"Windows (a GPU build of torch fighting faster-whisper's cuDNN):\n  {exc}\n"
+            "Fix: reinstall the CPU build of torch -\n"
+            "  pip install --force-reinstall torch torchvision "
+            "--index-url https://download.pytorch.org/whl/cpu\n"
+            "See the README 'GPU on Windows' section for the stable GPU setups."
+        )
 
     compute = "float16" if device == "cuda" else "int8"
     try:
@@ -398,6 +407,20 @@ def make_ocr(lang: str) -> Describer:
         return cache[path]
 
     return describe
+
+
+def _hq_available() -> bool:
+    """True if the high-quality describer's deps ([describe-hq]) are importable.
+
+    Distinguished from the lighter [describe] (BLIP) by ``torchvision`` (Qwen2-VL's processor
+    needs it). Used to auto-select the best *installed* describer with no flag.
+    """
+    import importlib.util
+
+    return all(
+        importlib.util.find_spec(m) is not None
+        for m in ("torch", "transformers", "torchvision")
+    )
 
 
 def _extract_frames(path: str, max_frames: int) -> list:
@@ -596,8 +619,8 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
                     help="BLIP captioning model id (default: blip-large; "
                          "use ...-base for faster/lighter)")
     ap.add_argument("--describe-hq", action="store_true",
-                    help="HQ describer (Qwen2-VL); also captions stickers + GIFs. "
-                         "Heavier; needs `pip install whispergram[describe-hq]`")
+                    help="force the HQ describer (Qwen2-VL) + sticker/GIF captions; "
+                         "auto-used by default when the [describe-hq] extra is installed")
     ap.add_argument("--offline", action="store_true",
                     help="use only already-downloaded models and make zero network calls")
     ap.add_argument("--no-media-markers", action="store_true",
@@ -633,6 +656,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     describer: Optional[Describer] = None
     ocr: Optional[Describer] = None
+    # Best installed describer by default: HQ (Qwen2-VL, the [describe-hq] extra) if available,
+    # else the lighter BLIP. --describe-hq forces HQ; --no-describe turns captioning off.
+    use_hq = (not args.no_describe) and (args.describe_hq or _hq_available())
+
     if args.dry_run:
         print("Dry run: not loading models; media is not transcribed, described, or read.")
 
@@ -651,15 +678,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         transcribe = make_transcriber(model, args.lang)
         if not args.no_describe:
             # None (with a hint) if the relevant describe extra isn't installed
-            describer = (make_hq_describer() if args.describe_hq
-                         else make_describer(args.describe_model))
+            describer = make_hq_describer() if use_hq else make_describer(args.describe_model)
+            if describer is None and use_hq:  # HQ deps present but load failed -> light fallback
+                describer = make_describer(args.describe_model)
+                use_hq = False
         if args.ocr:
             ocr = make_ocr(args.ocr_lang)
 
     describe, photo_label = _photo_reader(describer, ocr)
-    # --describe-hq also captions stickers + GIFs (via the raw, OCR-free describer)
-    media_describe = describer if args.describe_hq else None
-    describe_media = frozenset({"sticker", "animation"}) if args.describe_hq else frozenset()
+    # The HQ describer also captions stickers + GIFs (via the raw, OCR-free describer)
+    media_describe = describer if use_hq else None
+    describe_media = frozenset({"sticker", "animation"}) if use_hq else frozenset()
 
     with open(json_path, encoding="utf-8") as fh:
         data = json.load(fh)

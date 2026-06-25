@@ -12,6 +12,7 @@ import os
 
 import pytest
 
+import whispergram
 from whispergram import (
     __version__,
     _photo_reader,
@@ -539,6 +540,26 @@ def test_main_describes_photos_by_default(tmp_path):
 
     main(["--dry-run", "--no-describe", str(tmp_path), "--out", str(out)])
     assert out.read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] A (photo)"
+
+
+def test_main_auto_uses_hq_when_available(tmp_path, monkeypatch):
+    """By default (no flag), the HQ describer + sticker/GIF captions are used iff [describe-hq] is
+    installed; otherwise stickers/GIFs stay plain markers."""
+    (tmp_path / "stickers").mkdir()
+    (tmp_path / "stickers" / "s.webp").write_bytes(b"x")
+    (tmp_path / "result.json").write_text(json.dumps({"messages": [
+        {"type": "message", "date": "2026-06-20T10:00:00", "from": "A",
+         "media_type": "sticker", "sticker_emoji": ":)", "file": "stickers/s.webp"}]}))
+    out = tmp_path / "m.md"
+
+    monkeypatch.setattr(whispergram, "_hq_available", lambda: True)
+    main(["--dry-run", str(tmp_path), "--out", str(out)])
+    assert out.read_text(encoding="utf-8").strip() == (
+        "[2026-06-20 10:00] A (sticker :), described): [dry-run - not described]")
+
+    monkeypatch.setattr(whispergram, "_hq_available", lambda: False)
+    main(["--dry-run", str(tmp_path), "--out", str(out)])
+    assert out.read_text(encoding="utf-8").strip() == "[2026-06-20 10:00] A (sticker :))"
 
 
 def test_configure_hf_env(monkeypatch):
