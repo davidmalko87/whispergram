@@ -7,6 +7,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.7.0] - 2026-06-26
+
+### Added
+- **Resumable runs.** Every transcript/caption is cached to `.whispergram_cache.json` in the export
+  folder and flushed after each file, so closing the terminal or a crash no longer loses progress —
+  re-running continues where it left off (done files are skipped). `--no-cache` disables it; the
+  cache key includes the model, so switching models recomputes. Only successful (non-empty) results
+  are cached, so a transient model failure never poisons later runs, and the key uses each file's
+  export-relative path (not just its name) so same-named files in different subfolders can't collide.
+- **Queue multiple folders.** `whispergram folderA folderB folderC` processes them **sequentially**
+  (GPU-safe — no parallel VRAM pile-up) and **loads the models only once**, reusing them across
+  folders. `--out-dir DIR` collects each transcript as `DIR/<chat name>.md`; otherwise each folder
+  keeps its own `merged_chat.md`. Two chats with the same name are disambiguated (`Work (2).md`)
+  instead of overwriting, and a folder that fails (corrupt export, write error) is skipped — the rest
+  of the queue still runs and the exit code is non-zero.
+- **Progress bar** with live file counts + ETA (`28/47 [02:14<01:31], audio_28.ogg`) via tqdm (now a
+  declared dependency); falls back to a `[28/47]` counter line if tqdm is unavailable.
+
+### Changed
+- The per-file `transcribing …` / `describing …` prints are replaced by the single progress bar.
+- `tqdm` is now a core dependency (was relied on transitively).
+- `--out` and `--out-dir` are mutually exclusive (`--out` names one file; `--out-dir` collects a
+  queue).
+
+---
+
 ## [0.6.0] - 2026-06-25
 
 ### Changed

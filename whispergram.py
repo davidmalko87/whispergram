@@ -23,7 +23,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -137,6 +137,17 @@ def media_marker(msg: dict) -> str:
     return ""
 
 
+def _transcribe_types(audio_files: bool, video_files: bool) -> frozenset:
+    """Media types transcribed given the opt-in flags. Shared by build_transcript and count_jobs
+    so the progress total can never disagree with what's actually processed."""
+    types = {"voice_message", "video_message"}
+    if audio_files:
+        types.add("audio_file")
+    if video_files:
+        types.add("video_file")
+    return frozenset(types)
+
+
 def build_transcript(
     messages: Iterable[dict],
     export_dir: str,
@@ -149,6 +160,7 @@ def build_transcript(
     photo_label: str = "text",
     media_describe: Optional[Describer] = None,
     describe_media: frozenset = frozenset(),
+    on_job: Optional[Callable[[str], None]] = None,
 ) -> Tuple[List[str], Counter]:
     """Turn Telegram messages into merged transcript lines, chronological order preserved.
 
@@ -156,11 +168,7 @@ def build_transcript(
     photo path to extracted text (OCR or a caption). Missing media is never sent to either.
     Returns ``(lines, stats)`` where ``stats`` counts each outcome category.
     """
-    transcribe_types = {"voice_message", "video_message"}
-    if audio_files:
-        transcribe_types.add("audio_file")
-    if video_files:
-        transcribe_types.add("video_file")
+    transcribe_types = _transcribe_types(audio_files, video_files)
     lines: List[str] = []
     stats: Counter = Counter()
 
@@ -182,6 +190,8 @@ def build_transcript(
                 body = "[not exported]"
                 stats["missing"] += 1
             else:
+                if on_job is not None:
+                    on_job(os.path.basename(path))
                 body = transcribe(path)
                 stats["transcribed"] += 1
             line = f"[{ts}] {who} ({_KIND_LABEL[media_type]} {duration}s): {body}"
@@ -194,6 +204,8 @@ def build_transcript(
             photo_field = msg.get("photo") or ""
             photo_path = os.path.join(export_dir, photo_field)
             if not is_missing_media(photo_field, photo_path):
+                if on_job is not None:
+                    on_job(os.path.basename(photo_path))
                 extracted = describe(photo_path).strip()
                 if extracted:
                     line = f"[{ts}] {who} (photo, {photo_label}): {extracted}"
@@ -204,10 +216,14 @@ def build_transcript(
                     continue
             # photo missing or nothing extracted -> fall through to the plain (photo) marker
 
-        if media_describe is not None and media_type in describe_media:
+        if media_describe is not None and media_type in describe_media and not msg.get("photo"):
+            # `not photo` keeps this exclusive with the photo block above, mirroring count_jobs
+            # so on_job fires at most once per message (the bar never exceeds its total).
             file_field = msg.get("file") or ""
             media_path = os.path.join(export_dir, file_field)
             if file_field and not is_missing_media(file_field, media_path):
+                if on_job is not None:
+                    on_job(os.path.basename(media_path))
                 extracted = media_describe(media_path).strip()
                 if extracted:
                     marker = media_marker(msg)
@@ -238,6 +254,41 @@ def build_transcript(
             stats["empty"] += 1
 
     return lines, stats
+
+
+def count_jobs(
+    messages: Iterable[dict],
+    export_dir: str,
+    *,
+    audio_files: bool = False,
+    video_files: bool = False,
+    describe_photos: bool = False,
+    describe_media: frozenset = frozenset(),
+) -> int:
+    """Count media items that will be transcribed/described with a present file - the total for
+    the progress bar. Mirrors build_transcript's three model-call sites exactly.
+    """
+    transcribe_types = _transcribe_types(audio_files, video_files)
+    n = 0
+    for msg in messages:
+        if msg.get("type") != "message":
+            continue
+        media_type = msg.get("media_type")
+        if media_type in transcribe_types:
+            f = msg.get("file") or ""
+            if f and not is_missing_media(f, os.path.join(export_dir, f)):
+                n += 1
+            continue
+        if describe_photos and msg.get("photo"):
+            pf = msg.get("photo") or ""
+            if not is_missing_media(pf, os.path.join(export_dir, pf)):
+                n += 1
+            continue
+        if describe_media and media_type in describe_media:
+            f = msg.get("file") or ""
+            if f and not is_missing_media(f, os.path.join(export_dir, f)):
+                n += 1
+    return n
 
 
 def _photo_reader(
@@ -363,13 +414,86 @@ def load_model(model_name: str, device: str):
     return model
 
 
+def _cache_key(engine: str, path: str, export_dir: str) -> str:
+    """Cache key for a media file: engine + export-relative path + size (cheap, re-export-safe).
+
+    The relative path (not just the basename) keeps two same-named files in different Telegram
+    subfolders - e.g. voice_messages/a.ogg vs round_video_messages/a.ogg - from colliding.
+    """
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    try:
+        rel = os.path.relpath(path, export_dir).replace(os.sep, "/")
+    except ValueError:  # different drive on Windows -> fall back to the basename
+        rel = os.path.basename(path)
+    return f"{engine}\x1f{rel}\x1f{size}"
+
+
+class _Cache:
+    """On-disk cache of transcripts/captions, flushed after each item so runs are **resumable**.
+
+    Keyed by engine + export-relative path + size, so re-running an export continues where it left
+    off, and switching the model (a different engine string) recomputes. A ``None`` path disables
+    it. Only non-empty results are stored, so a transient failure never poisons later runs.
+    """
+
+    def __init__(self, path: Optional[str]):
+        self.path = path
+        self.data: dict = {}
+        if path and os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    self.data = json.load(fh).get("entries", {})
+            except Exception:
+                self.data = {}
+
+    def get(self, key: str) -> Optional[str]:
+        return self.data.get(key)
+
+    def put(self, key: str, value: str) -> None:
+        self.data[key] = value
+        if not self.path:
+            return
+        tmp = self.path + ".tmp"
+        try:  # atomic write so an interruption never corrupts the cache
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"version": 1, "entries": self.data}, fh, ensure_ascii=False)
+            os.replace(tmp, self.path)
+        except Exception:
+            pass
+
+
+def _with_cache(
+    fn: Describer, cache: "Optional[_Cache]", engine: str, export_dir: str
+) -> Describer:
+    """Wrap a transcribe/describe callable so results persist (resume) keyed by *engine*."""
+    if cache is None:
+        return fn
+
+    def wrapped(path: str) -> str:
+        key = _cache_key(engine, path, export_dir)
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        result = fn(path)
+        # Only persist real results: an empty string means the model was disabled or errored
+        # (GPU OOM, --offline with no weights, Tesseract failure). Caching it would make the
+        # blank a permanent "hit" and never retry; leaving it out lets the next run recompute.
+        if result:
+            cache.put(key, result)
+        return result
+
+    return wrapped
+
+
 def make_transcriber(model, lang: Optional[str]) -> Transcriber:
     """Build a caching ``transcribe(path) -> text`` closure over a loaded model."""
     cache: dict = {}
 
     def transcribe(path: str) -> str:
         if path not in cache:
-            print(f"  transcribing {os.path.basename(path)} ...")
             segments, _ = model.transcribe(path, language=lang, vad_filter=True)
             cache[path] = " ".join(s.text.strip() for s in segments).strip() or "[no speech]"
         return cache[path]
@@ -397,7 +521,6 @@ def make_ocr(lang: str) -> Describer:
 
     def describe(path: str) -> str:
         if path not in cache:
-            print(f"  reading {os.path.basename(path)} ...")
             try:
                 raw = pytesseract.image_to_string(Image.open(path), lang=lang)
             except Exception as exc:
@@ -492,7 +615,6 @@ def make_describer(
                       "photos shown as plain markers.")
                 state["disabled"] = True
                 return ""
-        print(f"  describing {os.path.basename(path)} ...")
         try:
             image = Image.open(path).convert("RGB")
             inputs = state["proc"](image, return_tensors="pt").to(state["device"])
@@ -552,7 +674,6 @@ def make_hq_describer(
                 print(f"Note: HQ captioning disabled ({type(exc).__name__}); using markers.")
                 state["disabled"] = True
                 return ""
-        print(f"  describing {os.path.basename(path)} ...")
         try:
             frames = _extract_frames(path, max_frames)
             if not frames:
@@ -594,8 +715,8 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         prog="whispergram",
         description="Merge Telegram voice/video notes into the text chat as one transcript.",
     )
-    ap.add_argument("export_dir", nargs="?", default=".",
-                    help="Telegram export folder (default: current dir)")
+    ap.add_argument("export_dirs", nargs="*", default=["."], metavar="export_dir",
+                    help="Telegram export folder(s); pass several to queue them (default: .)")
     ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"],
                     help="cuda (GPU) or cpu; auto-falls back to cpu (default: cuda)")
     ap.add_argument("--model", default="large-v3",
@@ -603,7 +724,11 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     ap.add_argument("--lang", default=None,
                     help="force a language code (uk, ru, en ...); default: auto-detect")
     ap.add_argument("--out", default=None,
-                    help="output file (default: <export_dir>/merged_chat.md)")
+                    help="output file for a single folder (default: <export_dir>/merged_chat.md)")
+    ap.add_argument("--out-dir", default=None,
+                    help="collect each folder's transcript here as '<chat name>.md' (for queues)")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="don't read/write the per-folder resume cache (.whispergram_cache.json)")
     ap.add_argument("--audio-files", action="store_true",
                     help="also transcribe audio_file messages (music, memos); off by default")
     ap.add_argument("--video-files", action="store_true",
@@ -633,6 +758,113 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+def _safe_name(name: str) -> str:
+    """Filesystem-safe filename stem from a chat name (falls back to 'chat')."""
+    cleaned = "".join("_" if c in '<>:"/\\|?*' else c for c in (name or "")).strip().strip(".")
+    return cleaned[:120] or "chat"
+
+
+def _resolve_out(export_dir: str, data: dict, args: argparse.Namespace) -> str:
+    """Where this folder's merged transcript is written."""
+    if args.out_dir:
+        name = _safe_name(data.get("name") or os.path.basename(os.path.abspath(export_dir)))
+        return os.path.join(args.out_dir, f"{name}.md")
+    if args.out:
+        return args.out
+    return os.path.join(export_dir, "merged_chat.md")
+
+
+def _dedupe_output(out_path: str, used: set) -> str:
+    """Never silently overwrite an earlier folder's transcript when two chats resolve to the same
+    filename (common in --out-dir queues: duplicate chat names, sanitized-equal names). Append
+    ' (2)', ' (3)', ... and tell the user. ``used`` holds normalized paths claimed this run."""
+    def norm(p: str) -> str:
+        return os.path.normcase(os.path.abspath(p))
+
+    if norm(out_path) not in used:
+        used.add(norm(out_path))
+        return out_path
+    root, ext = os.path.splitext(out_path)
+    i = 2
+    while norm(f"{root} ({i}){ext}") in used:
+        i += 1
+    deduped = f"{root} ({i}){ext}"
+    used.add(norm(deduped))
+    print(f"  note: '{os.path.basename(out_path)}' already written this run; "
+          f"saving as '{os.path.basename(deduped)}' instead (duplicate chat name)")
+    return deduped
+
+
+def _progress(total: int):
+    """Return ``(bar, on_job)`` for the media work - a tqdm bar if available, else a counter
+    print. ``(None, None)`` when there is nothing to process."""
+    if total <= 0:
+        return None, None
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        done = [0]
+
+        def on_job(label: str) -> None:
+            done[0] += 1
+            print(f"  [{done[0]}/{total}] {label}", flush=True)
+
+        return None, on_job
+
+    bar = tqdm(total=total, unit="file", dynamic_ncols=True,
+               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]{postfix}")
+
+    def on_job(label: str) -> None:
+        bar.set_postfix_str(label, refresh=False)
+        bar.update(1)
+
+    return bar, on_job
+
+
+def _process_export(export_dir, *, args, transcribe, describe, photo_label, media_describe,
+                    describe_media, engines, cache_enabled, used_outputs) -> bool:
+    """Transcribe one export folder into its merged file. Returns False if skipped (no JSON)."""
+    if not glob.glob(os.path.join(export_dir, "*.json")):
+        print(f"  skip {export_dir}: no .json export found")
+        return False
+    json_path = find_json(export_dir)
+    with open(json_path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    messages = data.get("messages", [])
+    out_path = _dedupe_output(_resolve_out(export_dir, data, args), used_outputs)
+
+    cache_path = os.path.join(export_dir, ".whispergram_cache.json") if cache_enabled else None
+    cache = _Cache(cache_path)
+    t = _with_cache(transcribe, cache, engines["whisper"], export_dir)
+    d = (_with_cache(describe, cache, engines["photo"], export_dir)
+         if describe is not None else None)
+    m = (_with_cache(media_describe, cache, engines["media"], export_dir)
+         if media_describe is not None else None)
+
+    total = count_jobs(messages, export_dir, audio_files=args.audio_files,
+                       video_files=args.video_files, describe_photos=d is not None,
+                       describe_media=describe_media)
+    bar, on_job = _progress(total)
+
+    lines, stats = build_transcript(
+        messages, export_dir, t,
+        media_markers=not args.no_media_markers,
+        audio_files=args.audio_files, video_files=args.video_files,
+        describe=d, photo_label=photo_label,
+        media_describe=m, describe_media=describe_media,
+        on_job=on_job,
+    )
+    if bar is not None:
+        bar.close()
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    print(f"OK  {out_path}  ({len(lines)} lines, {stats['transcribed']} transcribed, "
+          f"{stats['described']} described, {stats['missing']} not exported)")
+    return True
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Entry point. Returns a process exit code."""
     try:
@@ -646,20 +878,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         _setup_cuda_windows()
         return 0
 
-    if not os.path.isdir(args.export_dir):
-        sys.exit(f"Export folder not found: {os.path.abspath(args.export_dir)}")
+    export_dirs = args.export_dirs or ["."]
+    for d in export_dirs:
+        if not os.path.isdir(d):
+            sys.exit(f"Export folder not found: {os.path.abspath(d)}")
+    if args.out and args.out_dir:
+        sys.exit("--out and --out-dir are mutually exclusive: --out names one file, "
+                 "--out-dir collects a queue as '<chat name>.md'.")
+    if len(export_dirs) > 1 and args.out:
+        sys.exit("--out is for a single folder; use --out-dir to collect several transcripts.")
 
     _configure_hf_env(args.offline)
-    json_path = find_json(args.export_dir)
-    out_path = args.out or os.path.join(args.export_dir, "merged_chat.md")
-    print(f"Export: {os.path.basename(json_path)}")
 
+    # Build the transcriber/describer ONCE - models load once and are reused across queued folders.
+    use_hq = (not args.no_describe) and (args.describe_hq or _hq_available())
     describer: Optional[Describer] = None
     ocr: Optional[Describer] = None
-    # Best installed describer by default: HQ (Qwen2-VL, the [describe-hq] extra) if available,
-    # else the lighter BLIP. --describe-hq forces HQ; --no-describe turns captioning off.
-    use_hq = (not args.no_describe) and (args.describe_hq or _hq_available())
-
     if args.dry_run:
         print("Dry run: not loading models; media is not transcribed, described, or read.")
 
@@ -677,7 +911,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         model = load_model(args.model, args.device)
         transcribe = make_transcriber(model, args.lang)
         if not args.no_describe:
-            # None (with a hint) if the relevant describe extra isn't installed
             describer = make_hq_describer() if use_hq else make_describer(args.describe_model)
             if describer is None and use_hq:  # HQ deps present but load failed -> light fallback
                 describer = make_describer(args.describe_model)
@@ -686,35 +919,39 @@ def main(argv: Optional[List[str]] = None) -> int:
             ocr = make_ocr(args.ocr_lang)
 
     describe, photo_label = _photo_reader(describer, ocr)
-    # The HQ describer also captions stickers + GIFs (via the raw, OCR-free describer)
     media_describe = describer if use_hq else None
     describe_media = frozenset({"sticker", "animation"}) if use_hq else frozenset()
 
-    with open(json_path, encoding="utf-8") as fh:
-        data = json.load(fh)
+    desc_id = "qwen2-vl" if use_hq else f"blip:{args.describe_model}"
+    engines = {
+        "whisper": f"whisper:{args.model}:{args.lang}",
+        "photo": f"photo:{desc_id}:{'ocr:' + args.ocr_lang if args.ocr else 'noocr'}",
+        "media": f"media:{desc_id}",
+    }
+    cache_enabled = (not args.no_cache) and (not args.dry_run)
+    if args.out_dir:
+        os.makedirs(args.out_dir, exist_ok=True)
 
-    lines, stats = build_transcript(
-        data.get("messages", []),
-        args.export_dir,
-        transcribe,
-        media_markers=not args.no_media_markers,
-        audio_files=args.audio_files,
-        video_files=args.video_files,
-        describe=describe,
-        photo_label=photo_label,
-        media_describe=media_describe,
-        describe_media=describe_media,
-    )
+    used_outputs: set = set()
+    failures: List[str] = []
+    for i, export_dir in enumerate(export_dirs, 1):
+        if len(export_dirs) > 1:
+            print(f"\n[{i}/{len(export_dirs)}] {export_dir}")
+        try:
+            # Isolate each folder: one bad export (corrupt JSON, a decode/write error) must not
+            # abort the rest of an overnight queue. The resume cache keeps finished work.
+            _process_export(
+                export_dir, args=args, transcribe=transcribe, describe=describe,
+                photo_label=photo_label, media_describe=media_describe,
+                describe_media=describe_media, engines=engines, cache_enabled=cache_enabled,
+                used_outputs=used_outputs)
+        except Exception as exc:  # noqa: BLE001 - keep the queue going, report at the end
+            failures.append(export_dir)
+            print(f"FAILED {export_dir}: {type(exc).__name__}: {exc}")
 
-    with open(out_path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
-
-    print(
-        f"\nOK  {out_path}\n"
-        f"    {len(lines)} lines | {stats['transcribed']} transcribed | "
-        f"{stats['missing']} not exported | {stats['described']} photos read | "
-        f"{stats['media']} other media | {stats['text']} text"
-    )
+    if failures:
+        print(f"\n{len(failures)} of {len(export_dirs)} folder(s) failed: {', '.join(failures)}")
+        return 1
     return 0
 
 
