@@ -24,7 +24,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.8.2"
+__version__ = "0.8.3"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -517,12 +517,18 @@ def make_transcriber(model, lang: Optional[str], batch_size: int = 0) -> Transcr
 
     def transcribe(path: str) -> str:
         if path not in cache:
-            if batched:
-                segments, _ = engine.transcribe(path, language=lang, vad_filter=True,
-                                                batch_size=batch_size)
-            else:
-                segments, _ = model.transcribe(path, language=lang, vad_filter=True)
-            cache[path] = " ".join(s.text.strip() for s in segments).strip() or "[no speech]"
+            try:
+                if batched:
+                    segments, _ = engine.transcribe(path, language=lang, vad_filter=True,
+                                                    batch_size=batch_size)
+                else:
+                    segments, _ = model.transcribe(path, language=lang, vad_filter=True)
+                cache[path] = " ".join(s.text.strip() for s in segments).strip() or "[no speech]"
+            except Exception as exc:
+                # One unreadable file (no audio stream, odd container) must NOT abort the whole
+                # folder's queue - mark it and move on, mirroring the describe path.
+                print(f"    transcribe failed on {os.path.basename(path)}: {exc}")
+                cache[path] = "[transcription failed]"
         return cache[path]
 
     return transcribe
@@ -597,6 +603,15 @@ def _hq_available() -> bool:
     )
 
 
+def _sample_indices(total: int, n: int) -> List[int]:
+    """Evenly-spaced frame indices (in order) for sampling *n* of *total* frames. Handles the
+    single-frame case without dividing by zero (the bug a 1-frame .webm sticker hit)."""
+    n = min(max(n, 1), max(total, 1))
+    if n == 1:
+        return [max(total - 1, 0) // 2]
+    return sorted({round(i * (total - 1) / (n - 1)) for i in range(n)})
+
+
 def _extract_frames(path: str, max_frames: int) -> list:
     """Return PIL frames from a media file: one for stills, up to *max_frames* evenly sampled
     (in order) for videos/GIFs (.mp4/.webm/...). Used so describers can caption animations.
@@ -609,11 +624,7 @@ def _extract_frames(path: str, max_frames: int) -> list:
         frames = [f.to_image() for f in av.open(path).decode(video=0)]
         if not frames:
             return []
-        if max_frames <= 1:
-            return [frames[len(frames) // 2]]
-        n = min(max_frames, len(frames))
-        idxs = sorted({round(i * (len(frames) - 1) / (n - 1)) for i in range(n)})
-        return [frames[i] for i in idxs]
+        return [frames[i] for i in _sample_indices(len(frames), max_frames)]
     return [Image.open(path).convert("RGB")]
 
 

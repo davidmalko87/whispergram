@@ -898,6 +898,25 @@ def test_make_transcriber_empty_is_no_speech():
     assert make_transcriber(Silent(), None)("x.ogg") == "[no speech]"
 
 
+def test_make_transcriber_one_bad_file_does_not_abort():
+    """A file that makes the model raise (e.g. a video with no audio) must degrade to a marker,
+    not propagate and kill the whole folder's queue."""
+    class Boom(_FakeModel):
+        def transcribe(self, path, language=None, vad_filter=True, **kw):
+            raise IndexError("tuple index out of range")
+    assert make_transcriber(Boom(), None)("video_13.mp4") == "[transcription failed]"
+
+
+def test_sample_indices_handles_single_frame():
+    # the .webm 1-frame case that used to divide by zero
+    assert whispergram._sample_indices(1, 6) == [0]
+    assert whispergram._sample_indices(0, 6) == [0]      # empty guard, no crash
+    assert whispergram._sample_indices(5, 1) == [2]      # max_frames<=1 -> middle frame
+    idxs = whispergram._sample_indices(10, 6)            # normal: 6 in-order, in-range indices
+    assert idxs == sorted(idxs) and len(idxs) == 6 and idxs[0] == 0 and idxs[-1] == 9
+    assert all(0 <= i < 10 for i in idxs)
+
+
 def test_batch_size_flag_parses():
     assert _parse_args(["."]).batch_size == 0               # default off
     assert _parse_args(["--batch-size", "16", "."]).batch_size == 16
