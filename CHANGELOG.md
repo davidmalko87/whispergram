@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.8.3] - 2026-06-26
+
+### Fixed
+- **A single unreadable audio/video file no longer aborts the whole folder.** The transcription path
+  now catches per-file errors (e.g. `IndexError` from a video with no audio stream) and marks just
+  that item `[transcription failed]`, mirroring the describe path — so a large export with one bad
+  file still completes instead of dying mid-queue.
+- **1-frame video stickers (`.webm`) no longer error with "division by zero"** during frame
+  sampling; the frame picker now handles the single-frame case (factored into a tested
+  `_sample_indices` helper).
+
+---
+
 ## [0.8.2] - 2026-06-26
 
 ### Fixed
