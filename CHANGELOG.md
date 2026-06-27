@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.8.4] - 2026-06-26
+
+### Added
+- **Keeps the machine awake during a run** so a long overnight job isn't interrupted by idle-sleep
+  (Windows; a no-op on other OSes). It blocks idle-sleep only, not closing the laptop lid. Sleep is
+  restored when the run finishes. (A near-complete ~19 h run had stopped at 98% to idle-sleep — the
+  resume cache meant nothing was lost, but the run now simply doesn't get cut off.)
+
+---
+
 ## [0.8.3] - 2026-06-26
 
 ### Fixed

@@ -24,7 +24,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.8.3"
+__version__ = "0.8.4"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -930,6 +930,25 @@ def _process_export(export_dir, *, args, transcribe, describe, photo_label, medi
     return True
 
 
+def _prevent_sleep():
+    """Keep the system awake during a long run so idle-sleep doesn't interrupt it. Windows only
+    (``SetThreadExecutionState``); a harmless no-op elsewhere. Returns a restore callable.
+
+    Blocks *idle* sleep, not closing the laptop lid - that's a separate OS policy.
+    """
+    if os.name != "nt":
+        return lambda: None
+    try:
+        import ctypes
+
+        es_continuous = 0x80000000
+        es_system_required = 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
+        return lambda: ctypes.windll.kernel32.SetThreadExecutionState(es_continuous)
+    except Exception:
+        return lambda: None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Entry point. Returns a process exit code."""
     try:
@@ -1002,20 +1021,24 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     used_outputs: set = set()
     failures: List[str] = []
-    for i, export_dir in enumerate(export_dirs, 1):
-        if len(export_dirs) > 1:
-            print(f"\n[{i}/{len(export_dirs)}] {export_dir}")
-        try:
-            # Isolate each folder: one bad export (corrupt JSON, a decode/write error) must not
-            # abort the rest of an overnight queue. The resume cache keeps finished work.
-            _process_export(
-                export_dir, args=args, transcribe=transcribe, describe=describe,
-                photo_label=photo_label, media_describe=media_describe,
-                describe_media=describe_media, engines=engines, cache_enabled=cache_enabled,
-                used_outputs=used_outputs)
-        except Exception as exc:  # noqa: BLE001 - keep the queue going, report at the end
-            failures.append(export_dir)
-            print(f"FAILED {export_dir}: {type(exc).__name__}: {exc}")
+    restore_sleep = _prevent_sleep()  # don't let an idle-sleep interrupt a long overnight run
+    try:
+        for i, export_dir in enumerate(export_dirs, 1):
+            if len(export_dirs) > 1:
+                print(f"\n[{i}/{len(export_dirs)}] {export_dir}")
+            try:
+                # Isolate each folder: one bad export (corrupt JSON, a decode/write error) must
+                # not abort the rest of an overnight queue. The resume cache keeps finished work.
+                _process_export(
+                    export_dir, args=args, transcribe=transcribe, describe=describe,
+                    photo_label=photo_label, media_describe=media_describe,
+                    describe_media=describe_media, engines=engines, cache_enabled=cache_enabled,
+                    used_outputs=used_outputs)
+            except Exception as exc:  # noqa: BLE001 - keep the queue going, report at the end
+                failures.append(export_dir)
+                print(f"FAILED {export_dir}: {type(exc).__name__}: {exc}")
+    finally:
+        restore_sleep()
 
     if failures:
         print(f"\n{len(failures)} of {len(export_dirs)} folder(s) failed: {', '.join(failures)}")
