@@ -981,6 +981,13 @@ def test_find_tesseract(monkeypatch):
     assert _find_tesseract() is None
 
 
+def test_prevent_sleep_returns_callable():
+    """Off Windows it's a no-op; either way it returns a callable restore fn that doesn't raise."""
+    restore = whispergram._prevent_sleep()
+    assert callable(restore)
+    restore()  # must not raise
+
+
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
