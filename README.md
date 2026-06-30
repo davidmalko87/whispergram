@@ -59,9 +59,10 @@ search, or feed to a model.
 | **Photo descriptions** | Captioned automatically by the best installed local model — BLIP (`[describe]`) for photos, or Qwen2-VL (`[describe-hq]`) for photos + stickers + GIFs |
 | **Resumable** | Progress is cached per file — close the terminal or crash, then re-run and it continues where it left off |
 | **Queue folders** | Transcribe many exports in one command (models load once); `--out-dir` collects the results |
+| **Interactive menu** | `--menu` scans a folder for all your chats and lets you pick what to transcribe with a best-models preset — no flags to remember |
 | **Instagram too** | Auto-detects an Instagram DM export and merges it the same way — voice transcribed, photos described, shared Reels as markers, the mojibake encoding repaired |
 | **Progress bar** | Live `done/total` + ETA per folder |
-| **Round-trip verified** | A rich synthetic export runs through the full pipeline and is diffed line-for-line; 96 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | A rich synthetic export runs through the full pipeline and is diffed line-for-line; 100 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -118,7 +119,18 @@ for whatever you ticked.
 
 ### 3. Run
 
-From **inside** the export folder:
+**Easiest — the interactive menu** (no flags to remember): from the folder that holds your exports,
+
+```bash
+whispergram --menu
+```
+
+It scans for every Telegram **and** Instagram chat, lists them with platform, name and voice/photo
+counts, and lets you pick which to do plus a one-keystroke preset — **"Everything, best models"** is
+the recommended default (transcribe voice+video, describe photos/stickers/GIFs, OCR). That's the
+simplest way to "transcribe everything with the best models" without learning the flags below.
+
+Otherwise, from **inside** a single export folder:
 
 ```bash
 whispergram
@@ -479,7 +491,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 96 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 100 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

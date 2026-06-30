@@ -18,10 +18,12 @@ from whispergram import (
     _Cache,
     _cache_key,
     _dedupe_output,
+    _discover_chats,
     _fix_mojibake,
     _ig_media_path,
     _normalize_instagram,
     _parse_args,
+    _parse_selection,
     _photo_reader,
     _safe_name,
     _with_cache,
@@ -34,6 +36,7 @@ from whispergram import (
     main,
     make_transcriber,
     media_marker,
+    run_menu,
 )
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "sample_export")
@@ -1073,6 +1076,58 @@ def test_main_instagram_end_to_end(tmp_path):
     assert "привіт" in text and "дивись" in text             # decoded content
     assert "instagram.com/reel/ABC" in text                  # shared reel rendered inline
     assert "Ð" not in text and "Ñ" not in text               # no mojibake leaked through
+
+
+# --- interactive menu (v0.10.0) -------------------------------------------------------
+def test_parse_selection():
+    assert _parse_selection("all", 5) == [1, 2, 3, 4, 5]
+    assert _parse_selection("", 3) == [1, 2, 3]
+    assert _parse_selection("1,3-5", 6) == [1, 3, 4, 5]
+    assert _parse_selection("2 , 4", 4) == [2, 4]
+    assert _parse_selection("9", 3) == []            # out-of-range dropped
+    assert _parse_selection("nonsense", 3) == []
+
+
+def _write_tg_chat(folder, name):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "result.json").write_text(json.dumps({"name": name, "messages": [
+        {"type": "message", "date": "2026-06-20T10:00:00", "from": name,
+         "media_type": "voice_message", "file": "voice_messages/a.ogg"}]}))
+
+
+def test_discover_chats(tmp_path):
+    _write_tg_chat(tmp_path / "tg", "Alex")
+    _write_ig_thread(tmp_path / "inbox" / "maria_1")
+    chats = _discover_chats(str(tmp_path))
+    assert len(chats) == 2
+    assert {c["platform"] for c in chats} == {"Telegram", "Instagram"}
+    assert any(c["name"] == "Марічка" for c in chats)        # IG title decoded
+    assert any(c["name"] == "Alex" and c["voice"] == 1 for c in chats)
+
+
+def test_run_menu_everything_preset(tmp_path, monkeypatch):
+    _write_tg_chat(tmp_path / "tg", "Alex")
+    _write_ig_thread(tmp_path / "inbox" / "maria_1")
+    # answers: selection, preset, ocr-langs, output dir, press-enter-to-start
+    answers = iter(["all", "1", "ukr+rus+eng", str(tmp_path / "out"), ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    ns = _parse_args(["--menu", str(tmp_path)])
+    dirs, ns = run_menu(ns)
+    assert len(dirs) == 2
+    assert ns.no_describe is False and ns.describe_hq and ns.video_files and ns.ocr
+    assert ns.ocr_lang == "ukr+rus+eng"
+    assert os.path.abspath(ns.out_dir) == os.path.abspath(str(tmp_path / "out"))
+
+
+def test_run_menu_voice_only_and_subset(tmp_path, monkeypatch):
+    _write_tg_chat(tmp_path / "a", "A")
+    _write_tg_chat(tmp_path / "b", "B")
+    answers = iter(["1", "2", "", ""])  # chat 1, preset 2 (voice+video), default out, go
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    ns = _parse_args(["--menu", str(tmp_path)])
+    dirs, ns = run_menu(ns)
+    assert len(dirs) == 1                              # only one chat selected
+    assert ns.no_describe is True and ns.video_files is True and ns.ocr is False
 
 
 def test_version_is_semver():
