@@ -16,6 +16,7 @@ License : MIT
 from __future__ import annotations
 
 import argparse
+import datetime
 import glob
 import json
 import os
@@ -24,7 +25,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.8.4"
+__version__ = "0.9.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -56,6 +57,113 @@ def find_json(export_dir: str) -> str:
     if exact:
         return exact
     return next((c for c in cands if "result" in os.path.basename(c).lower()), cands[0])
+
+
+# --------------------------------------------------------------------------------------
+# Instagram DM export reader
+#
+# Instagram's "Download your information" (JSON) uses a different schema from Telegram and two
+# quirks we normalise away here, then hand the result to the same build_transcript pipeline:
+#   1. text is mojibaked - UTF-8 stored as latin-1-escaped bytes (Cyrillic/emoji come out garbled),
+#   2. a thread is paginated across message_1.json, message_2.json, ... newest-first.
+# A shared Reel/post is only a link (no video file), so it becomes an inline text marker.
+# --------------------------------------------------------------------------------------
+def _fix_mojibake(text: str) -> str:
+    """Undo Instagram's latin-1-escaped-UTF-8 mangling so Ukrainian/Russian/emoji read correctly.
+    A no-op for text that is already valid (e.g. plain ASCII or correctly-encoded Cyrillic)."""
+    if not text:
+        return text
+    try:
+        return text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
+def _ig_timestamp(ms: int) -> str:
+    """Instagram's epoch-millis -> the ``YYYY-MM-DDTHH:MM:SS`` string build_transcript expects."""
+    try:
+        return datetime.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%dT%H:%M:%S")
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def _ig_media_path(uri: str) -> str:
+    """Instagram media ``uri`` is a full export-root-relative path; keep the last two components
+    (``<subfolder>/<file>``, e.g. ``audio/audioclip-….mp4``) so it resolves against the thread
+    folder build_transcript is pointed at."""
+    if not uri:
+        return ""
+    parts = uri.replace("\\", "/").rstrip("/").split("/")
+    return "/".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+
+
+def is_instagram_export(export_dir: str) -> bool:
+    """True if *export_dir* looks like an Instagram DM thread export (a ``message_1.json`` whose
+    messages carry ``sender_name``/``timestamp_ms`` rather than Telegram's ``type``/``date``)."""
+    m1 = os.path.join(export_dir, "message_1.json")
+    if not os.path.exists(m1):
+        return False
+    try:
+        with open(m1, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return False
+    msgs = data.get("messages")
+    if not isinstance(msgs, list):
+        return False
+    return "participants" in data or bool(msgs and "sender_name" in msgs[0])
+
+
+def _normalize_instagram(export_dir: str) -> Tuple[List[dict], str]:
+    """Load every ``message_*.json`` in an Instagram thread folder, merge + sort chronologically,
+    fix the encoding, and convert to the internal (Telegram-shaped) message list. Each media item
+    becomes its own message; a shared reel/post becomes an inline text marker. Returns
+    ``(messages, chat_name)``."""
+    raw: List[dict] = []
+    title = ""
+    for f in sorted(glob.glob(os.path.join(export_dir, "message_*.json"))):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception:
+            continue
+        title = title or data.get("title") or ""
+        raw.extend(data.get("messages", []))
+    raw.sort(key=lambda m: m.get("timestamp_ms", 0))  # export is newest-first; we want oldest-first
+
+    out: List[dict] = []
+    for m in raw:
+        ts = _ig_timestamp(m.get("timestamp_ms", 0))
+        who = _fix_mojibake(m.get("sender_name") or "Unknown")
+        base = {"type": "message", "date": ts, "from": who}
+
+        def media_msg(kind, uri):
+            return {**base, "media_type": kind, "file": _ig_media_path(uri)}
+
+        for a in m.get("audio_files") or []:
+            out.append(media_msg("voice_message", a.get("uri")))
+        for v in m.get("videos") or []:
+            out.append(media_msg("video_file", v.get("uri")))
+        for p in m.get("photos") or []:
+            out.append({**base, "photo": _ig_media_path(p.get("uri"))})
+        for g in m.get("gifs") or []:
+            out.append(media_msg("animation", g.get("uri")))
+        sticker = m.get("sticker")
+        if sticker and sticker.get("uri"):
+            out.append(media_msg("sticker", sticker["uri"]))
+        share = m.get("share")
+        if share and (share.get("link") or share.get("share_text")):
+            owner = _fix_mojibake(share.get("original_content_owner") or "")
+            link = share.get("link") or ""
+            marker = "shared reel/post" + (f" by {owner}" if owner else "")
+            line = f"[{marker}{(': ' + link) if link else ''}]"
+            extra = _fix_mojibake(share.get("share_text") or "").strip()
+            out.append({**base, "text": f"{line} {extra}".strip()})
+        content = _fix_mojibake(m.get("content") or "").strip()
+        if content:
+            out.append({**base, "text": content})
+
+    return out, _fix_mojibake(title) or os.path.basename(os.path.abspath(export_dir))
 
 
 def extract_text(msg: dict) -> str:
@@ -892,10 +1000,15 @@ def _process_export(export_dir, *, args, transcribe, describe, photo_label, medi
     if not glob.glob(os.path.join(export_dir, "*.json")):
         print(f"  skip {export_dir}: no .json export found")
         return False
-    json_path = find_json(export_dir)
-    with open(json_path, encoding="utf-8-sig") as fh:  # utf-8-sig tolerates a leading BOM
-        data = json.load(fh)
-    messages = data.get("messages", [])
+    if is_instagram_export(export_dir):
+        messages, chat_name = _normalize_instagram(export_dir)
+        data = {"name": chat_name, "messages": messages}
+        print(f"  Instagram export: {chat_name} ({len(messages)} items)")
+    else:
+        json_path = find_json(export_dir)
+        with open(json_path, encoding="utf-8-sig") as fh:  # utf-8-sig tolerates a leading BOM
+            data = json.load(fh)
+        messages = data.get("messages", [])
     out_path = _dedupe_output(_resolve_out(export_dir, data, args), used_outputs)
 
     cache_path = os.path.join(export_dir, ".whispergram_cache.json") if cache_enabled else None

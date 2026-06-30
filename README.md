@@ -59,8 +59,9 @@ search, or feed to a model.
 | **Photo descriptions** | Captioned automatically by the best installed local model — BLIP (`[describe]`) for photos, or Qwen2-VL (`[describe-hq]`) for photos + stickers + GIFs |
 | **Resumable** | Progress is cached per file — close the terminal or crash, then re-run and it continues where it left off |
 | **Queue folders** | Transcribe many exports in one command (models load once); `--out-dir` collects the results |
+| **Instagram too** | Auto-detects an Instagram DM export and merges it the same way — voice transcribed, photos described, shared Reels as markers, the mojibake encoding repaired |
 | **Progress bar** | Live `done/total` + ETA per folder |
-| **Round-trip verified** | A rich synthetic export runs through the full pipeline and is diffed line-for-line; 85 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | A rich synthetic export runs through the full pipeline and is diffed line-for-line; 96 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -132,6 +133,26 @@ whispergram "path/to/ChatExport_2026-06-20"
 ```
 
 The result is `merged_chat.md` in the export folder.
+
+### Instagram DMs
+
+whispergram also reads **Instagram** direct-message exports — no flag, it auto-detects them. In
+Instagram → **Accounts Center → Your information and permissions → Download your information**, choose
+**Messages**, format **JSON**, and **Media quality: High**. Then point whispergram at a single
+conversation folder:
+
+```bash
+whispergram "your_instagram_activity/messages/inbox/<thread>" --out-dir "C:\merged" --describe-hq
+```
+
+It transcribes voice messages, describes photos/videos/GIFs, and renders a shared Reel/post as
+`[shared reel/post by <author>: <link>]` (Instagram doesn't include the reel's video in the export).
+Instagram's JSON mojibakes non-Latin text — whispergram **repairs the encoding** so Ukrainian/Russian
+and emoji read correctly, and merges paginated `message_*.json` files chronologically.
+
+> Thread folders are often just numeric IDs — the real name is in each thread's `title` field (shown
+> in the merged file's chat name). End-to-end-encrypted chats aren't in the standard export; they need
+> Instagram's separate **encrypted-chat** download.
 
 ### Best quality (use your GPU)
 
@@ -458,7 +479,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 85 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 96 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

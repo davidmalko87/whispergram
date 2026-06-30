@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.0] - 2026-06-30
+
+### Added
+- **Instagram DM support.** Point whispergram at an Instagram messages export thread folder
+  (`your_instagram_activity/messages/inbox/<thread>/`) and it's auto-detected and merged with the
+  same pipeline — voice messages transcribed (Whisper), photos/videos/GIFs described (Qwen2-VL/BLIP),
+  shared Reels/posts rendered inline as `[shared reel/post by <author>: <link>]` markers. Instagram's
+  JSON quirks are handled: the latin-1/UTF-8 **mojibake** is repaired (Cyrillic/emoji read correctly)
+  and paginated `message_*.json` files are merged and sorted chronologically. Validated against a real
+  6.6k-message export — every media item mapped, all media paths resolved, zero mojibake leaked.
+
+### Notes
+- Instagram doesn't include shared Reels' video in the export (only the link), so reels appear as
+  markers, not transcripts. End-to-end-encrypted chats need Instagram's separate encrypted-chat
+  download, not the standard "Download your information" export.
+
+---
+
 ## [0.8.4] - 2026-06-26
 
 ### Added

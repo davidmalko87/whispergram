@@ -18,6 +18,9 @@ from whispergram import (
     _Cache,
     _cache_key,
     _dedupe_output,
+    _fix_mojibake,
+    _ig_media_path,
+    _normalize_instagram,
     _parse_args,
     _photo_reader,
     _safe_name,
@@ -26,6 +29,7 @@ from whispergram import (
     count_jobs,
     extract_text,
     find_json,
+    is_instagram_export,
     is_missing_media,
     main,
     make_transcriber,
@@ -986,6 +990,89 @@ def test_prevent_sleep_returns_callable():
     restore = whispergram._prevent_sleep()
     assert callable(restore)
     restore()  # must not raise
+
+
+# --- Instagram reader (v0.9.0) ---------------------------------------------------------
+def _moji(s):
+    """Simulate Instagram's latin-1-escaped-UTF-8 mangling of a string."""
+    return s.encode("utf-8").decode("latin-1")
+
+
+def test_fix_mojibake_roundtrip():
+    assert _fix_mojibake(_moji("привіт 💋")) == "привіт 💋"   # mojibaked -> repaired
+    assert _fix_mojibake("plain ascii") == "plain ascii"      # ascii unchanged
+    assert _fix_mojibake("вже коректний") == "вже коректний"  # already-correct Cyrillic unchanged
+    assert _fix_mojibake("") == ""
+
+
+def test_ig_media_path():
+    full = "your_instagram_activity/messages/inbox/x/audio/clip.mp4"
+    assert _ig_media_path(full) == "audio/clip.mp4"           # last two components
+    assert _ig_media_path("photos/p.jpg") == "photos/p.jpg"
+    assert _ig_media_path("") == ""
+
+
+def _write_ig_thread(folder):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "audio").mkdir()
+    (folder / "audio" / "v.mp4").write_bytes(b"x")
+    (folder / "photos").mkdir()
+    (folder / "photos" / "p.jpg").write_bytes(b"x")
+    pre = "your_instagram_activity/messages/inbox/maria/"
+    data = {
+        "participants": [{"name": "Maria"}, {"name": "David"}],
+        "title": _moji("Марічка"),
+        "messages": [  # deliberately newest-first / out of order
+            {"sender_name": "David", "timestamp_ms": 3000, "content": _moji("привіт")},
+            {"sender_name": _moji("Марічка"), "timestamp_ms": 1000,
+             "audio_files": [{"uri": pre + "audio/v.mp4"}]},
+            {"sender_name": "David", "timestamp_ms": 2000,
+             "share": {"link": "https://www.instagram.com/reel/ABC/",
+                       "original_content_owner": "someone", "share_text": _moji("кіно")}},
+            {"sender_name": _moji("Марічка"), "timestamp_ms": 1500,
+             "photos": [{"uri": pre + "photos/p.jpg"}], "content": _moji("дивись")},
+            {"sender_name": "David", "timestamp_ms": 2500,
+             "reactions": [{"actor": "Maria", "reaction": "love"}]},  # reaction-only -> no line
+        ],
+    }
+    (folder / "message_1.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_is_instagram_export(tmp_path):
+    ig = tmp_path / "ig"
+    _write_ig_thread(ig)
+    assert is_instagram_export(str(ig)) is True
+    assert is_instagram_export(FIXTURE) is False             # the Telegram fixture
+    assert is_instagram_export(str(tmp_path / "nope")) is False
+
+
+def test_normalize_instagram(tmp_path):
+    ig = tmp_path / "ig"
+    _write_ig_thread(ig)
+    msgs, name = _normalize_instagram(str(ig))
+    assert name == "Марічка"                                 # title decoded
+    assert [m["date"] for m in msgs] == sorted(m["date"] for m in msgs)  # chronological
+    voice = [m for m in msgs if m.get("media_type") == "voice_message"]
+    photo = [m for m in msgs if m.get("photo")]
+    share = [m for m in msgs if "[shared reel/post" in (m.get("text") or "")]
+    assert voice and voice[0]["file"] == "audio/v.mp4"       # path = last 2 components
+    assert photo and photo[0]["photo"] == "photos/p.jpg"
+    assert share and "instagram.com/reel/ABC" in share[0]["text"] and "someone" in share[0]["text"]
+    assert any(m.get("from") == "Марічка" for m in msgs)     # sender decoded
+    assert any((m.get("text") or "") == "привіт" for m in msgs)  # content decoded
+    assert not any((m.get("text") or "") == "love" for m in msgs)  # reaction-only dropped
+
+
+def test_main_instagram_end_to_end(tmp_path):
+    ig = tmp_path / "ChatExport_ig"
+    _write_ig_thread(ig)
+    out = tmp_path / "merged.md"
+    rc = main(["--dry-run", "--no-describe", str(ig), "--out", str(out)])
+    assert rc == 0
+    text = out.read_text(encoding="utf-8")
+    assert "привіт" in text and "дивись" in text             # decoded content
+    assert "instagram.com/reel/ABC" in text                  # shared reel rendered inline
+    assert "Ð" not in text and "Ñ" not in text               # no mojibake leaked through
 
 
 def test_version_is_semver():
