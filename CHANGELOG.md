@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.10.0] - 2026-06-30
+
+### Added
+- **Interactive `--menu`** — the easy way, no flags to remember. Run `whispergram --menu` in a folder
+  that holds your exports and it scans for every **Telegram and Instagram** chat, lists them with
+  platform + name + voice/photo/video counts (voice-heavy first), and lets you pick which to
+  transcribe plus a quality preset: **"Everything, best models"** (recommended default — transcribe
+  voice+video, describe photos/stickers/GIFs, OCR), "Voice & video only", or Custom. Scanning a real
+  260-thread Instagram inbox takes ~4 s.
+
+---
+
 ## [0.9.0] - 2026-06-30
 
 ### Added

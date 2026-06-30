@@ -25,7 +25,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -886,7 +886,10 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         description="Merge Telegram voice/video notes into the text chat as one transcript.",
     )
     ap.add_argument("export_dirs", nargs="*", default=["."], metavar="export_dir",
-                    help="Telegram export folder(s); pass several to queue them (default: .)")
+                    help="Telegram/Instagram export folder(s); pass several to queue (default: .)")
+    ap.add_argument("--menu", action="store_true",
+                    help="interactive picker: scan a folder for chats and choose which to "
+                         "transcribe and how - the easy way, no flags to remember")
     ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"],
                     help="cuda (GPU) or cpu; auto-falls back to cpu (default: cuda)")
     ap.add_argument("--model", default="large-v3",
@@ -1043,6 +1046,132 @@ def _process_export(export_dir, *, args, transcribe, describe, photo_label, medi
     return True
 
 
+# --------------------------------------------------------------------------------------
+# Interactive menu - scan a folder for chats and pick what to transcribe, no flags to remember
+# --------------------------------------------------------------------------------------
+_TG_MEDIA_DIRS = frozenset({"voice_messages", "video_files", "round_video_messages",
+                            "photos", "stickers", "files", "audio", "videos", "gifs"})
+
+
+def _chat_summary(export_dir: str) -> Optional[dict]:
+    """Identify a Telegram or Instagram export folder and return a one-line summary
+    (platform, name, voice/photo/video counts), or ``None`` if it isn't a chat export."""
+    if is_instagram_export(export_dir):
+        msgs, name = _normalize_instagram(export_dir)
+        return {"dir": export_dir, "platform": "Instagram", "name": name, "total": len(msgs),
+                "voice": sum(1 for m in msgs if m.get("media_type") == "voice_message"),
+                "photo": sum(1 for m in msgs if m.get("photo")),
+                "video": sum(1 for m in msgs if m.get("media_type") == "video_file")}
+    for j in sorted(glob.glob(os.path.join(export_dir, "*.json"))):
+        try:
+            with open(j, encoding="utf-8-sig") as fh:
+                data = json.load(fh)
+        except Exception:
+            continue
+        msgs = data.get("messages")
+        if not isinstance(msgs, list):
+            continue
+        if data.get("name") or (msgs and isinstance(msgs[0], dict) and msgs[0].get("type")):
+            md = [m for m in msgs if isinstance(m, dict)]
+            return {"dir": export_dir, "platform": "Telegram", "total": len(md),
+                    "name": data.get("name") or os.path.basename(os.path.abspath(export_dir)),
+                    "voice": sum(1 for m in md if m.get("media_type") in ("voice_message",
+                                                                          "video_message")),
+                    "photo": sum(1 for m in md if m.get("photo")),
+                    "video": sum(1 for m in md if m.get("media_type") == "video_file")}
+    return None
+
+
+def _discover_chats(root: str) -> List[dict]:
+    """Find every Telegram/Instagram chat export under *root*, sorted voice-heavy first."""
+    candidates = []
+    for dirpath, dirs, files in os.walk(root):
+        if any(f.endswith(".json") for f in files):
+            candidates.append(dirpath)
+            if "message_1.json" in files or "result.json" in files:
+                dirs[:] = [d for d in dirs if d not in _TG_MEDIA_DIRS]
+    chats = []
+    for i, d in enumerate(candidates, 1):
+        print(f"\r  scanning {i}/{len(candidates)} ...", end="", flush=True)
+        s = _chat_summary(d)
+        if s:
+            chats.append(s)
+    if candidates:
+        print()
+    chats.sort(key=lambda c: (c["voice"], c["total"]), reverse=True)
+    return chats
+
+
+def _parse_selection(text: str, n: int) -> List[int]:
+    """Parse a menu selection like ``1,3-5`` or ``all`` into a sorted list of 1-based indices."""
+    text = text.strip().lower()
+    if text in ("", "all", "*"):
+        return list(range(1, n + 1))
+    picked = set()
+    for part in text.replace(" ", "").split(","):
+        if "-" in part:
+            a, _, b = part.partition("-")
+            if a.isdigit() and b.isdigit():
+                picked.update(range(int(a), int(b) + 1))
+        elif part.isdigit():
+            picked.add(int(part))
+    return sorted(i for i in picked if 1 <= i <= n)
+
+
+def _ask_yes(prompt: str, default: bool) -> bool:
+    ans = input(f"  {prompt} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
+    return default if not ans else ans.startswith("y")
+
+
+def run_menu(args: argparse.Namespace) -> Tuple[List[str], argparse.Namespace]:
+    """Interactive picker: scan for chats, let the user choose which + a quality preset, and set the
+    matching options on *args*. Returns ``(selected_dirs, args)`` (empty list = nothing to do)."""
+    root = args.export_dirs[0] if args.export_dirs else "."
+    print(f"Scanning {os.path.abspath(root)} for chats ...")
+    chats = _discover_chats(root)
+    if not chats:
+        print("No Telegram or Instagram exports found here. cd into the folder that contains them.")
+        return [], args
+    print(f"\nFound {len(chats)} chat(s):\n")
+    print(f"  {'#':>3}  {'platform':<9} {'voice':>5} {'photo':>5} {'video':>5}  name")
+    for i, c in enumerate(chats, 1):
+        print(f"  {i:>3}  {c['platform']:<9} {c['voice']:>5} {c['photo']:>5} {c['video']:>5}  "
+              f"{c['name']}")
+
+    chosen = [chats[i - 1] for i in
+              _parse_selection(input("\nWhich chats? (e.g. 1,3-5 or 'all') [all]: "), len(chats))]
+    if not chosen:
+        print("Nothing selected.")
+        return [], args
+
+    print("\nWhat to include:")
+    print("  1. Everything, best models  - transcribe voice+video, describe photos/stickers/GIFs, "
+          "OCR  [recommended]")
+    print("  2. Voice & video only       - fast; no image descriptions or OCR")
+    print("  3. Custom")
+    preset = input("Choose [1]: ").strip() or "1"
+    if preset == "2":
+        args.no_describe, args.video_files, args.ocr = True, True, False
+    elif preset == "3":
+        args.no_describe = not _ask_yes("Describe photos/stickers/GIFs (vision model)?", True)
+        args.describe_hq = (not args.no_describe) and _ask_yes(
+            "Use the high-quality describer (Qwen2-VL; also captions stickers/GIFs)?", True)
+        args.video_files = _ask_yes("Transcribe regular videos' audio?", True)
+        args.ocr = _ask_yes("OCR text from photos/screenshots (needs Tesseract)?", False)
+        if args.ocr:
+            args.ocr_lang = input(f"  OCR languages [{args.ocr_lang}]: ").strip() or args.ocr_lang
+    else:  # 1 - everything, best models
+        args.no_describe, args.describe_hq, args.video_files, args.ocr = False, True, True, True
+        args.ocr_lang = (input(f"OCR languages (e.g. ukr+rus+eng) [{args.ocr_lang}]: ").strip()
+                         or args.ocr_lang)
+
+    default_out = os.path.abspath(os.path.join(root, "transcripts"))
+    args.out_dir = input(f"\nOutput folder [{default_out}]: ").strip() or default_out
+    print(f"\n-> {len(chosen)} chat(s) -> {args.out_dir}")
+    input("Press Enter to start (Ctrl+C to cancel) ... ")
+    return [c["dir"] for c in chosen], args
+
+
 def _prevent_sleep():
     """Keep the system awake during a long run so idle-sleep doesn't interrupt it. Windows only
     (``SetThreadExecutionState``); a harmless no-op elsewhere. Returns a restore callable.
@@ -1074,6 +1203,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.setup_cuda_windows:
         _setup_cuda_windows()
         return 0
+
+    if args.menu:
+        if not sys.stdin.isatty():
+            sys.exit("--menu needs an interactive terminal.")
+        try:
+            selected, args = run_menu(args)
+        except (KeyboardInterrupt, EOFError):
+            print("\nCancelled.")
+            return 0
+        if not selected:
+            return 0
+        args.export_dirs = selected
 
     export_dirs = args.export_dirs or ["."]
     for d in export_dirs:
