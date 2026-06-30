@@ -1,6 +1,8 @@
 # --- Private chat data: NEVER commit ---
 ChatExport_*/
 DataExport_*/
+your_instagram_activity/
+instagram_threads_index.txt
 *.json
 *.ogg
 *.opus
