@@ -70,7 +70,7 @@ message exports** — no flag, the format is detected for you.
 | **Queue chats** | Transcribe many exports (Telegram and/or Instagram, mixed) in one command — models load once; `--out-dir` collects the results |
 | **Interactive menu** | `--menu` scans a folder for all your Telegram **and** Instagram chats and lets you pick what to transcribe with a best-models preset — no flags to remember |
 | **Progress bar** | Live `done/total` + ETA per chat |
-| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 111 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 115 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -177,8 +177,9 @@ works — scanning a real 260-thread Instagram inbox takes ~4 s):
 whispergram --menu
 ```
 
-It lists every Telegram **and** Instagram chat it finds with platform, name and voice/photo/video
-counts (voice-heavy first), lets you pick which to do (`1,3-5` or `all`), and offers a one-keystroke
+It lists every Telegram **and** Instagram chat it finds with platform, name, **date range** and
+voice/photo/video counts (voice-heavy first, or `--sort messages`/`recent`/`name`) — so same-named
+exports are easy to tell apart — lets you pick which to do (`1,3-5` or `all`), and offers a one-keystroke
 preset — **"Everything, best models"** is the recommended default (transcribe voice+video, describe
 photos/stickers/GIFs, OCR). That's the simplest way to "transcribe everything with the best models"
 without learning the flags below.
@@ -401,6 +402,7 @@ whispergram --out result.md                       # custom output path
 | Flag | Default | Notes |
 |---|---|---|
 | `--menu` | off | interactive picker: scan a folder for all Telegram/Instagram chats and choose |
+| `--sort` | `voice` | menu order: `voice`, `messages`, `recent` (last message), or `name` |
 | `--device` | `cuda` | `cuda` or `cpu`; auto-falls back to CPU if the GPU fails |
 | `--model` | `large-v3` | try `large-v3-turbo` or `medium` if CPU is slow |
 | `--compute-type` | `auto` | `auto`, `float16`, `int8_float16`, `int8`, `float32`. `auto` = int8 on CPU, float16 on GPU (auto **int8_float16 on low-VRAM GPUs** so large-v3 fits). Use `int8_float16` if a GPU run hangs at `0%` on a ≤4 GB card |
@@ -589,7 +591,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 111 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 115 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

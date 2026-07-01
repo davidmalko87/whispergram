@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.3.0] - 2026-07-01
+
+### Added
+- **Date range in the `--menu` chat picker.** Each discovered chat now shows the span of its messages
+  (`YYYY-MM-DD` for a single day, else `first..last`) alongside the voice/photo/video counts, so
+  same-named exports — e.g. several `Анастасія` folders from different days — are easy to tell apart.
+- **`--sort` for the menu order**: `voice` (most voice notes, default), `messages` (most messages),
+  `recent` (most recent last message), or `name` (A-Z) — e.g. `whispergram --menu --sort recent`.
+
+---
+
 ## [1.2.0] - 2026-07-01
 
 ### Fixed
