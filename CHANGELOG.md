@@ -7,6 +7,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.0] - 2026-07-01
+
+First **stable** release. whispergram now treats **Instagram DMs as a first-class platform** alongside
+**Telegram**, with balanced, up-to-date documentation for both. No changes to the transcription/merge
+engine or the CLI surface — existing commands and output are unchanged; this release marks the tool
+as stable.
+
+### Changed
+- **Documentation rebalanced for two platforms.** The README gives Telegram and Instagram equal,
+  first-class treatment — parallel export guides (Telegram Desktop JSON *and* Instagram "Download your
+  information"), platform-agnostic run examples, a dedicated Instagram how-to, and both platforms
+  covered across the feature list, round-trip section, limitations and FAQ.
+- **Round-trip validated on both platforms** against real exports: a 20,156-message Telegram export
+  (→ 20,136 transcript lines, zero dropped) and an 1,860-message Instagram thread (141 voice notes
+  transcribed, zero dropped). Confirmed that Instagram voice notes transcribe **by default** (no
+  `--audio-files` needed) and that the progress-bar total always equals the real work performed.
+- **Packaging metadata**: `description` and `keywords` now cover Instagram / direct messages, and the
+  project's Development Status is promoted to **Production/Stable**.
+
+### Fixed
+- **`.gitignore` hardening**: also ignores `round_video_messages/`, `video_messages/` and
+  `*_thumb.jpg`, so Telegram round-video thumbnails can never be committed alongside a private export.
+
+---
+
 ## [0.10.0] - 2026-06-30
 
 ### Added
