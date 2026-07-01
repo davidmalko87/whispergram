@@ -26,7 +26,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -926,6 +926,9 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     ap.add_argument("--menu", action="store_true",
                     help="interactive picker: scan a folder for chats and choose which to "
                          "transcribe and how - the easy way, no flags to remember")
+    ap.add_argument("--sort", default="voice", choices=["voice", "messages", "recent", "name"],
+                    help="menu order: voice (most voice notes, default), messages (most messages), "
+                         "recent (most recent last message), name (A-Z)")
     ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"],
                     help="cuda (GPU) or cpu; auto-falls back to cpu (default: cuda)")
     ap.add_argument("--model", default="large-v3",
@@ -1093,15 +1096,46 @@ _TG_MEDIA_DIRS = frozenset({"voice_messages", "video_files", "round_video_messag
                             "photos", "stickers", "files", "audio", "videos", "gifs"})
 
 
+def _date_span(messages: Iterable[dict]) -> Tuple[str, str]:
+    """``(first, last)`` message date as ``YYYY-MM-DD`` across *messages*, or ``('', '')`` if none
+    carry a date. ISO date strings sort chronologically, so min/max on the day string is correct."""
+    days = sorted((m.get("date") or "")[:10] for m in messages if m.get("date"))
+    return (days[0], days[-1]) if days else ("", "")
+
+
+def _fmt_dates(first: str, last: str) -> str:
+    """Compact date-span label for the menu: ``YYYY-MM-DD`` for a single day, else
+    ``first..last`` (ASCII-only), or ``''`` when no dates are known."""
+    if not first:
+        return ""
+    return first if first == last else f"{first}..{last}"
+
+
+def _sort_chats(chats: List[dict], key: str) -> List[dict]:
+    """Order discovered chats for the menu. ``voice`` (default) = most voice notes first;
+    ``messages`` = most messages first; ``recent`` = most recent last message first; ``name`` = A-Z.
+    Ties fall back to voice then total so the order is always deterministic."""
+    if key == "name":
+        return sorted(chats, key=lambda c: (c.get("name") or "").lower())
+    keyers = {
+        "voice": lambda c: (c.get("voice", 0), c.get("total", 0)),
+        "messages": lambda c: (c.get("total", 0), c.get("voice", 0)),
+        "recent": lambda c: (c.get("last", ""), c.get("voice", 0), c.get("total", 0)),
+    }
+    return sorted(chats, key=keyers.get(key, keyers["voice"]), reverse=True)
+
+
 def _chat_summary(export_dir: str) -> Optional[dict]:
-    """Identify a Telegram or Instagram export folder and return a one-line summary
-    (platform, name, voice/photo/video counts), or ``None`` if it isn't a chat export."""
+    """Identify a Telegram or Instagram export folder and return a one-line summary (platform, name,
+    voice/photo/video counts, date span), or ``None`` if it isn't a chat export."""
     if is_instagram_export(export_dir):
         msgs, name = _normalize_instagram(export_dir)
+        first, last = _date_span(msgs)
         return {"dir": export_dir, "platform": "Instagram", "name": name, "total": len(msgs),
                 "voice": sum(1 for m in msgs if m.get("media_type") == "voice_message"),
                 "photo": sum(1 for m in msgs if m.get("photo")),
-                "video": sum(1 for m in msgs if m.get("media_type") == "video_file")}
+                "video": sum(1 for m in msgs if m.get("media_type") == "video_file"),
+                "first": first, "last": last}
     for j in sorted(glob.glob(os.path.join(export_dir, "*.json"))):
         try:
             with open(j, encoding="utf-8-sig") as fh:
@@ -1113,12 +1147,14 @@ def _chat_summary(export_dir: str) -> Optional[dict]:
             continue
         if data.get("name") or (msgs and isinstance(msgs[0], dict) and msgs[0].get("type")):
             md = [m for m in msgs if isinstance(m, dict)]
+            first, last = _date_span(md)
             return {"dir": export_dir, "platform": "Telegram", "total": len(md),
                     "name": data.get("name") or os.path.basename(os.path.abspath(export_dir)),
                     "voice": sum(1 for m in md if m.get("media_type") in ("voice_message",
                                                                           "video_message")),
                     "photo": sum(1 for m in md if m.get("photo")),
-                    "video": sum(1 for m in md if m.get("media_type") == "video_file")}
+                    "video": sum(1 for m in md if m.get("media_type") == "video_file"),
+                    "first": first, "last": last}
     return None
 
 
@@ -1195,11 +1231,13 @@ def run_menu(args: argparse.Namespace,
     if not chats:
         print("No Telegram or Instagram exports found here. cd into the folder that contains them.")
         return [], args
+    chats = _sort_chats(chats, getattr(args, "sort", "voice"))
     print(f"\nFound {len(chats)} chat(s):\n")
-    print(f"  {'#':>3}  {'platform':<9} {'voice':>5} {'photo':>5} {'video':>5}  name")
+    print(f"  {'#':>3}  {'platform':<9} {'voice':>5} {'photo':>5} {'video':>5}  "
+          f"{'dates':<22}  name")
     for i, c in enumerate(chats, 1):
         print(f"  {i:>3}  {c['platform']:<9} {c['voice']:>5} {c['photo']:>5} {c['video']:>5}  "
-              f"{c['name']}")
+              f"{_fmt_dates(c.get('first', ''), c.get('last', '')):<22}  {c['name']}")
 
     chosen = [chats[i - 1] for i in
               _parse_selection(input("\nWhich chats? (e.g. 1,3-5 or 'all') [all]: "), len(chats))]

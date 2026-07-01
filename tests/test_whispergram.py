@@ -1258,6 +1258,45 @@ def test_compute_type_flag_parsed():
     assert _parse_args([]).compute_type == "auto"                             # default is auto
 
 
+def test_date_span_and_fmt():
+    msgs = [{"date": "2025-03-02T00:00:00"}, {"foo": 1}, {"date": "2025-01-05T12:00:00"}]
+    assert whispergram._date_span(msgs) == ("2025-01-05", "2025-03-02")   # min/max, undated ignored
+    assert whispergram._date_span([{"foo": 1}]) == ("", "")              # none dated
+    assert whispergram._fmt_dates("2026-06-20", "2026-06-20") == "2026-06-20"          # one day
+    assert whispergram._fmt_dates("2024-01-01", "2024-12-31") == "2024-01-01..2024-12-31"  # range
+    assert whispergram._fmt_dates("", "") == ""                                        # unknown
+
+
+def test_chat_summary_includes_date_span(tmp_path):
+    d = tmp_path / "tg"
+    d.mkdir()
+    (d / "result.json").write_text(json.dumps({"name": "Span", "messages": [
+        {"type": "message", "date": "2024-06-21T10:00:00", "from": "A", "text": "hi"},
+        {"type": "message", "date": "2025-11-01T09:30:00", "from": "A", "text": "bye"},
+    ]}))
+    s = whispergram._chat_summary(str(d))
+    assert s["first"] == "2024-06-21" and s["last"] == "2025-11-01"
+
+
+def test_sort_chats_orders():
+    chats = [
+        {"name": "Bravo", "voice": 5, "total": 10, "last": "2025-01-01"},
+        {"name": "alpha", "voice": 2, "total": 99, "last": "2026-12-31"},
+        {"name": "Charlie", "voice": 5, "total": 3, "last": "2024-06-01"},
+    ]
+    names = lambda k: [c["name"] for c in whispergram._sort_chats(chats, k)]  # noqa: E731
+    assert names("voice") == ["Bravo", "Charlie", "alpha"]      # voice desc, total tiebreak
+    assert names("messages") == ["alpha", "Bravo", "Charlie"]   # total desc
+    assert names("recent") == ["alpha", "Bravo", "Charlie"]     # last date desc
+    assert names("name") == ["alpha", "Bravo", "Charlie"]       # A-Z, case-insensitive
+    assert names("nonsense")[0] == "Bravo"                      # unknown key -> voice default
+
+
+def test_sort_flag_parsed():
+    assert _parse_args(["--sort", "recent"]).sort == "recent"
+    assert _parse_args([]).sort == "voice"                      # default
+
+
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
