@@ -7,6 +7,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.3.1] - 2026-07-01
+
+### Fixed
+- **Crash on a full Instagram export** (`AttributeError: 'list' object has no attribute 'get'`).
+  Pointing `--menu` or a bare run at an Instagram "Download your information" tree crashed because some
+  export JSONs (e.g. `messages/your_chat_information.json`) are top-level **lists**, not objects.
+  Hardened every JSON-shape assumption across the discovery *and* transcription paths — `is_instagram_export`,
+  `_chat_summary`, `_has_export_json`, and `_process_export` now skip any JSON that isn't a dict, and
+  `_normalize_instagram` tolerates non-dict message/media/sticker/share entries instead of crashing.
+  Discovery also isolates per-folder errors so one odd file can never abort a whole-tree scan.
+  Verified end-to-end on a real 412-file export: scans cleanly to 411 chats, and individual threads
+  transcribe without error.
+
+---
+
 ## [1.3.0] - 2026-07-01
 
 ### Added
