@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.0] - 2026-07-01
+
+### Fixed
+- **GPU runs hanging at `0%` on 4 GB cards.** With current CTranslate2 (cuDNN 9), `large-v3` in
+  float16 (~3 GB weights + workspace) may not fit a 4 GB GPU, and CTranslate2 **hangs** at
+  `large-v3 on cuda (float16)` / `0%` instead of erroring. Fixed by automatic int8 selection (below).
+  CPU runs were never affected.
+
+### Added
+- **`--compute-type`** (`auto` | `float16` | `int8_float16` | `int8` | `float32`) to choose
+  CTranslate2's precision, plus **automatic int8 on low-VRAM GPUs**. whispergram now reads free VRAM
+  (via `nvidia-smi`) and, below ~5 GB, loads `int8_float16` (~1.6 GB) automatically — so `large-v3`
+  fits and runs on the GPU with near-identical quality, printing a one-line note. `auto` still means
+  int8 on CPU and float16 on a roomy GPU; pass `--compute-type float16` to force the old behavior.
+
+---
+
 ## [1.1.0] - 2026-07-01
 
 ### Added

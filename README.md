@@ -70,7 +70,7 @@ message exports** — no flag, the format is detected for you.
 | **Queue chats** | Transcribe many exports (Telegram and/or Instagram, mixed) in one command — models load once; `--out-dir` collects the results |
 | **Interactive menu** | `--menu` scans a folder for all your Telegram **and** Instagram chats and lets you pick what to transcribe with a best-models preset — no flags to remember |
 | **Progress bar** | Live `done/total` + ETA per chat |
-| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 107 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 111 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -386,6 +386,7 @@ itself — not from a lack of effort in the tool:
 
 ```bash
 whispergram --device cpu --model large-v3-turbo   # no GPU, fast
+whispergram --compute-type int8_float16           # fit large-v3 on a small (<=4 GB) GPU
 whispergram --lang uk                             # force a language
 whispergram --dry-run                             # preview the merge, no transcription
 whispergram --audio-files                         # also transcribe music/long audio files (Telegram)
@@ -402,6 +403,7 @@ whispergram --out result.md                       # custom output path
 | `--menu` | off | interactive picker: scan a folder for all Telegram/Instagram chats and choose |
 | `--device` | `cuda` | `cuda` or `cpu`; auto-falls back to CPU if the GPU fails |
 | `--model` | `large-v3` | try `large-v3-turbo` or `medium` if CPU is slow |
+| `--compute-type` | `auto` | `auto`, `float16`, `int8_float16`, `int8`, `float32`. `auto` = int8 on CPU, float16 on GPU (auto **int8_float16 on low-VRAM GPUs** so large-v3 fits). Use `int8_float16` if a GPU run hangs at `0%` on a ≤4 GB card |
 | `--lang` | auto | force a code like `uk`, `ru`, `en` if auto-detect mislabels |
 | `--batch-size` | 0 | `N`>1 batches segments for a big **GPU** speedup; 0 = sequential (best quality) |
 | `--out` | `merged_chat.md` | output file for a **single** folder (mutually exclusive with `--out-dir`) |
@@ -440,6 +442,14 @@ whispergram --out result.md                       # custom output path
 
 > CTranslate2 loads cuBLAS/cuDNN lazily in native code that ignores `os.add_dll_directory`,
 > which is why placing the DLLs inside the package dir is the dependable solution.
+
+**Low-VRAM GPUs (≤ 4 GB) — a run that hangs at `0%`.** `large-v3` in float16 (~3 GB weights plus
+cuDNN 9 workspace) can fail to fit a 4 GB card, and CTranslate2 then **hangs** at
+`Model: large-v3 on cuda (float16)` / `0%` instead of erroring. whispergram handles this
+automatically: on a GPU with little free VRAM it loads **`int8_float16`** (~1.6 GB, near-identical
+quality) and prints a one-line note, so `large-v3` fits and runs on the GPU. Force it any time with
+`--compute-type int8_float16` (or `--compute-type float16` to opt out). This is why the default
+`--compute-type auto` "just works" on small GPUs.
 
 **GPU for photo/sticker/GIF captions is separate from Whisper's.** The describe models (BLIP /
 Qwen2-VL) use PyTorch, and `pip install` fetches the **CPU** build by default — so captioning runs on
@@ -579,7 +589,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 107 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 111 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

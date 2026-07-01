@@ -21,11 +21,12 @@ import glob
 import json
 import os
 import shutil
+import subprocess
 import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -505,7 +506,42 @@ def _configure_hf_env(offline: bool) -> None:
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 
-def load_model(model_name: str, device: str):
+# Below this much free VRAM, large-v3 in float16 (~3 GB weights + cuDNN 9 workspace) may not fit -
+# CTranslate2 can *hang* rather than error; int8_float16 (~1.6 GB) fits with near-identical quality.
+_LOW_VRAM_MIB = 5000
+
+
+def _gpu_free_mib() -> Optional[int]:
+    """Free VRAM (MiB) on the first CUDA GPU via ``nvidia-smi``, or ``None`` if it can't be read.
+    Used to auto-pick an int8 compute type on small GPUs where float16 large-v3 won't fit."""
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=6)
+        return int(out.stdout.strip().splitlines()[0])
+    except Exception:
+        return None
+
+
+def _resolve_compute_type(device: str, requested: str) -> str:
+    """Pick the CTranslate2 compute type. An explicit *requested* type wins; ``auto`` means int8 on
+    CPU, and float16 on GPU - except on a low-VRAM GPU, where int8_float16 is chosen so large-v3
+    actually fits (a 4 GB card can otherwise hang loading float16 large-v3)."""
+    if requested and requested != "auto":
+        return requested
+    if device != "cuda":
+        return "int8"
+    free = _gpu_free_mib()
+    if free is not None and free < _LOW_VRAM_MIB:
+        print(f"Low GPU memory ({free} MiB free): using int8_float16 so large-v3 fits on the GPU "
+              f"(pass --compute-type float16 to override).")
+        return "int8_float16"
+    return "float16"
+
+
+def load_model(model_name: str, device: str, compute_type: str = "auto"):
     """Load a faster-whisper model, falling back from CUDA to CPU on any load failure."""
     _register_cuda_dll_dirs()
     try:
@@ -525,7 +561,7 @@ def load_model(model_name: str, device: str):
             "See the README 'GPU on Windows' section for the stable GPU setups."
         )
 
-    compute = "float16" if device == "cuda" else "int8"
+    compute = _resolve_compute_type(device, compute_type)
     try:
         model = WhisperModel(model_name, device=device, compute_type=compute)
         print(f"Model: {model_name} on {device} ({compute})")
@@ -894,6 +930,10 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
                     help="cuda (GPU) or cpu; auto-falls back to cpu (default: cuda)")
     ap.add_argument("--model", default="large-v3",
                     help="whisper model: large-v3, large-v3-turbo, medium ... (default: large-v3)")
+    ap.add_argument("--compute-type", default="auto",
+                    help="CTranslate2 compute type: auto, float16, int8_float16, int8, float32. "
+                         "auto = int8 on CPU, float16 on GPU (int8_float16 on low-VRAM GPUs so "
+                         "large-v3 fits). Use int8_float16 if a GPU run hangs on a <=4 GB card")
     ap.add_argument("--lang", default=None,
                     help="force a language code (uk, ru, en ...); default: auto-detect")
     ap.add_argument("--batch-size", type=int, default=0, metavar="N",
@@ -1299,7 +1339,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             def ocr(_path: str) -> str:
                 return "[dry-run - not read]"
     else:
-        model = load_model(args.model, args.device)
+        model = load_model(args.model, args.device, args.compute_type)
         transcribe = make_transcriber(model, args.lang, args.batch_size)
         if args.batch_size and args.batch_size > 1:
             note = "" if args.device == "cuda" else " (needs a GPU to actually help)"
