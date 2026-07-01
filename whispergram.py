@@ -26,7 +26,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -109,6 +109,8 @@ def is_instagram_export(export_dir: str) -> bool:
             data = json.load(fh)
     except Exception:
         return False
+    if not isinstance(data, dict):  # some export JSONs are top-level lists, not objects
+        return False
     msgs = data.get("messages")
     if not isinstance(msgs, list):
         return False
@@ -128,8 +130,10 @@ def _normalize_instagram(export_dir: str) -> Tuple[List[dict], str]:
                 data = json.load(fh)
         except Exception:
             continue
+        if not isinstance(data, dict):
+            continue
         title = title or data.get("title") or ""
-        raw.extend(data.get("messages", []))
+        raw.extend(x for x in (data.get("messages") or []) if isinstance(x, dict))
     raw.sort(key=lambda m: m.get("timestamp_ms", 0))  # export is newest-first; we want oldest-first
 
     out: List[dict] = []
@@ -142,18 +146,22 @@ def _normalize_instagram(export_dir: str) -> Tuple[List[dict], str]:
             return {**base, "media_type": kind, "file": _ig_media_path(uri)}
 
         for a in m.get("audio_files") or []:
-            out.append(media_msg("voice_message", a.get("uri")))
+            if isinstance(a, dict):
+                out.append(media_msg("voice_message", a.get("uri")))
         for v in m.get("videos") or []:
-            out.append(media_msg("video_file", v.get("uri")))
+            if isinstance(v, dict):
+                out.append(media_msg("video_file", v.get("uri")))
         for p in m.get("photos") or []:
-            out.append({**base, "photo": _ig_media_path(p.get("uri"))})
+            if isinstance(p, dict):
+                out.append({**base, "photo": _ig_media_path(p.get("uri"))})
         for g in m.get("gifs") or []:
-            out.append(media_msg("animation", g.get("uri")))
+            if isinstance(g, dict):
+                out.append(media_msg("animation", g.get("uri")))
         sticker = m.get("sticker")
-        if sticker and sticker.get("uri"):
+        if isinstance(sticker, dict) and sticker.get("uri"):
             out.append(media_msg("sticker", sticker["uri"]))
         share = m.get("share")
-        if share and (share.get("link") or share.get("share_text")):
+        if isinstance(share, dict) and (share.get("link") or share.get("share_text")):
             owner = _fix_mojibake(share.get("original_content_owner") or "")
             link = share.get("link") or ""
             marker = "shared reel/post" + (f" by {owner}" if owner else "")
@@ -1054,7 +1062,10 @@ def _process_export(export_dir, *, args, transcribe, describe, photo_label, medi
         json_path = find_json(export_dir)
         with open(json_path, encoding="utf-8-sig") as fh:  # utf-8-sig tolerates a leading BOM
             data = json.load(fh)
-        messages = data.get("messages", [])
+        if not isinstance(data, dict):  # a top-level list isn't a chat export - skip, don't crash
+            print(f"  skip {export_dir}: {os.path.basename(json_path)} is not a chat export")
+            return False
+        messages = [m for m in (data.get("messages") or []) if isinstance(m, dict)]
     out_path = _dedupe_output(_resolve_out(export_dir, data, args), used_outputs)
 
     cache_path = os.path.join(export_dir, ".whispergram_cache.json") if cache_enabled else None
@@ -1142,6 +1153,8 @@ def _chat_summary(export_dir: str) -> Optional[dict]:
                 data = json.load(fh)
         except Exception:
             continue
+        if not isinstance(data, dict):  # e.g. Instagram's your_chat_information.json is a list
+            continue
         msgs = data.get("messages")
         if not isinstance(msgs, list):
             continue
@@ -1171,7 +1184,7 @@ def _has_export_json(export_dir: str) -> bool:
                 data = json.load(fh)
         except Exception:
             continue
-        if isinstance(data.get("messages"), list):
+        if isinstance(data, dict) and isinstance(data.get("messages"), list):
             return True
     return False
 
@@ -1187,7 +1200,10 @@ def _discover_chats(root: str) -> List[dict]:
     chats = []
     for i, d in enumerate(candidates, 1):
         print(f"\r  scanning {i}/{len(candidates)} ...", end="", flush=True)
-        s = _chat_summary(d)
+        try:
+            s = _chat_summary(d)  # one odd folder/JSON must never abort a whole-tree scan
+        except Exception:
+            s = None
         if s:
             chats.append(s)
     if candidates:

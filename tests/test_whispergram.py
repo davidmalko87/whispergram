@@ -1297,6 +1297,67 @@ def test_sort_flag_parsed():
     assert _parse_args([]).sort == "voice"                      # default
 
 
+def test_chat_summary_skips_top_level_list_json(tmp_path):
+    """A folder whose *.json is a top-level list (e.g. Instagram's your_chat_information.json)
+    is not a chat and must not crash _chat_summary."""
+    d = tmp_path / "messages"
+    d.mkdir()
+    (d / "your_chat_information.json").write_text(json.dumps(["Alex", "Maria"]))
+    assert whispergram._chat_summary(str(d)) is None
+
+
+def test_is_instagram_export_false_for_list_message1(tmp_path):
+    d = tmp_path / "t"
+    d.mkdir()
+    (d / "message_1.json").write_text(json.dumps([1, 2, 3]))   # a list, not the expected object
+    assert is_instagram_export(str(d)) is False               # must return False, not raise
+
+
+def test_discover_chats_survives_non_dict_json(tmp_path):
+    """A stray list-JSON in the tree must be skipped, not abort the whole scan."""
+    _write_tg_chat(tmp_path / "good", "Alex")
+    bad = tmp_path / "messages"
+    bad.mkdir()
+    (bad / "your_chat_information.json").write_text(json.dumps([{"x": 1}]))
+    chats = _discover_chats(str(tmp_path))
+    assert [c["name"] for c in chats] == ["Alex"]             # good chat found, bad folder skipped
+
+
+def test_has_export_json_survives_list_json(tmp_path):
+    d = tmp_path / "messages"
+    d.mkdir()
+    (d / "your_chat_information.json").write_text(json.dumps(["a", "b"]))  # top-level list
+    assert whispergram._has_export_json(str(d)) is False      # must return False, not raise
+
+
+def test_normalize_instagram_tolerates_malformed_items(tmp_path):
+    """Non-dict message/media/sticker/share entries must be skipped, not crash the thread."""
+    d = tmp_path / "thread"
+    d.mkdir()
+    (d / "message_1.json").write_text(json.dumps({
+        "participants": [{"name": "A"}, {"name": "B"}],
+        "title": "T",
+        "messages": [
+            "not a dict",                                          # bogus message entry
+            {"sender_name": "A", "timestamp_ms": 1000,
+             "audio_files": ["oops", {"uri": "x/audio/v.mp4"}],    # one bad item, one good
+             "sticker": "notadict", "share": "notadict"},
+            {"sender_name": "B", "timestamp_ms": 2000, "content": "hi"},
+        ],
+    }))
+    msgs, _name = whispergram._normalize_instagram(str(d))
+    assert any(m.get("media_type") == "voice_message" for m in msgs)  # good audio survived
+    assert any(m.get("text") == "hi" for m in msgs)                   # text survived
+
+
+def test_main_skips_folder_whose_json_is_a_list(tmp_path):
+    """Pointing directly at a folder whose only JSON is a top-level list is skipped, not a crash."""
+    d = tmp_path / "messages"
+    d.mkdir()
+    (d / "your_chat_information.json").write_text(json.dumps(["x"]))
+    assert main(["--dry-run", str(d)]) == 0                    # graceful skip, rc 0
+
+
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
