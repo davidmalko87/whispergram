@@ -70,7 +70,7 @@ message exports** — no flag, the format is detected for you.
 | **Queue chats** | Transcribe many exports (Telegram and/or Instagram, mixed) in one command — models load once; `--out-dir` collects the results |
 | **Interactive menu** | `--menu` scans a folder for all your Telegram **and** Instagram chats and lets you pick what to transcribe with a best-models preset — no flags to remember |
 | **Progress bar** | Live `done/total` + ETA per chat |
-| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 100 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 107 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -182,6 +182,11 @@ counts (voice-heavy first), lets you pick which to do (`1,3-5` or `all`), and of
 preset — **"Everything, best models"** is the recommended default (transcribe voice+video, describe
 photos/stickers/GIFs, OCR). That's the simplest way to "transcribe everything with the best models"
 without learning the flags below.
+
+> **You don't even have to type `--menu`.** If you run `whispergram` in a folder that isn't a chat
+> export itself but *contains* several — like your Instagram `your_instagram_activity` root, or a
+> folder holding many Telegram `ChatExport_*` folders — it **opens this picker automatically** instead
+> of stopping. (Running directly inside a single export folder transcribes just that chat, as before.)
 
 **Or point it directly at one export folder** — same command for either platform:
 
@@ -574,7 +579,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 100 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 107 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

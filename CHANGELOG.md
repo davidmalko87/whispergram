@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.0] - 2026-07-01
+
+### Added
+- **Auto-open the chat picker in a parent folder.** Running `whispergram` in a folder that isn't a
+  chat export itself but *contains* exports below it — an Instagram `your_instagram_activity` root,
+  or a folder holding several Telegram `ChatExport_*` folders — now automatically opens the
+  interactive picker (the `--menu` experience) instead of printing "no .json export found" and
+  stopping. Without an interactive terminal (a cron job or a pipe) it prints a one-line hint to
+  re-run with `--menu` rather than hanging. Running directly inside a single export folder is
+  unchanged. `run_menu` accepts the already-discovered chats, so the folder is scanned only once.
+
+---
+
 ## [1.0.0] - 2026-07-01
 
 First **stable** release. whispergram now treats **Instagram DMs as a first-class platform** alongside
