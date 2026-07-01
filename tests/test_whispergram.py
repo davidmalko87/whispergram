@@ -20,6 +20,7 @@ from whispergram import (
     _dedupe_output,
     _discover_chats,
     _fix_mojibake,
+    _has_export_json,
     _ig_media_path,
     _normalize_instagram,
     _parse_args,
@@ -1128,6 +1129,108 @@ def test_run_menu_voice_only_and_subset(tmp_path, monkeypatch):
     dirs, ns = run_menu(ns)
     assert len(dirs) == 1                              # only one chat selected
     assert ns.no_describe is True and ns.video_files is True and ns.ocr is False
+
+
+class _FakeStdin:
+    """Minimal stand-in so tests can control whether main() thinks it has an interactive TTY."""
+
+    def __init__(self, tty):
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+
+def test_has_export_json(tmp_path):
+    _write_tg_chat(tmp_path / "tg", "Alex")
+    _write_ig_thread(tmp_path / "inbox" / "maria")
+    assert _has_export_json(str(tmp_path / "tg")) is True          # Telegram export folder itself
+    assert _has_export_json(str(tmp_path / "inbox" / "maria")) is True  # Instagram thread folder
+    assert _has_export_json(str(tmp_path)) is False                # parent: no JSON directly inside
+    stray = tmp_path / "stray"
+    stray.mkdir()
+    (stray / "config.json").write_text(json.dumps({"setting": 1}))  # a non-export JSON ...
+    assert _has_export_json(str(stray)) is False                    # ... doesn't count as an export
+
+
+def test_main_auto_menu_when_folder_has_only_nested_exports(tmp_path, monkeypatch):
+    """A bare run in a parent folder (no export JSON directly inside, e.g. an Instagram
+    `your_instagram_activity` root) auto-opens the picker instead of dead-ending."""
+    _write_tg_chat(tmp_path / "tg", "Alex")
+    _write_ig_thread(tmp_path / "inbox" / "maria")
+    out = tmp_path / "out"
+    # run_menu answers: selection, preset (2 = voice/video only), output dir, press-enter-to-start
+    answers = iter(["all", "2", str(out), ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(True))
+
+    rc = main(["--dry-run", str(tmp_path)])          # no --menu flag; detection kicks in
+    assert rc == 0
+    assert len(list(out.glob("*.md"))) == 2          # both nested chats were transcribed
+
+
+def test_main_auto_menu_ignores_stray_json_in_parent(tmp_path, monkeypatch):
+    """A non-export *.json in the parent (e.g. config.json) must NOT suppress auto-discovery."""
+    (tmp_path / "notes.json").write_text(json.dumps({"hello": "world"}))
+    _write_tg_chat(tmp_path / "tg", "Alex")
+    out = tmp_path / "out"
+    answers = iter(["all", "2", str(out), ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(True))
+    rc = main(["--dry-run", str(tmp_path)])
+    assert rc == 0
+    assert len(list(out.glob("*.md"))) == 1          # the nested chat was still found + transcribed
+
+
+def test_main_does_not_auto_menu_for_multiple_dirs(tmp_path, monkeypatch):
+    """Passing several folders is an explicit queue - never hijacked into the picker, even if none
+    are exports (they just skip as before)."""
+    def _boom(*_a, **_k):
+        raise AssertionError("discovery must not run for a multi-folder queue")
+
+    monkeypatch.setattr(whispergram, "_discover_chats", _boom)
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(True))
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    rc = main(["--dry-run", str(a), str(b), "--out-dir", str(tmp_path / "o")])
+    assert rc == 0          # both skip (no export), queue completes; discovery never fires
+
+
+def test_main_hints_when_nested_but_not_interactive(tmp_path, monkeypatch):
+    """Without a TTY we can't prompt, so main points the user at --menu rather than hanging."""
+    _write_tg_chat(tmp_path / "tg", "Alex")
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(False))
+    with pytest.raises(SystemExit) as exc:
+        main(["--dry-run", str(tmp_path)])
+    assert "--menu" in str(exc.value)
+
+
+def test_main_does_not_auto_menu_when_folder_is_an_export(tmp_path, monkeypatch):
+    """When the folder is itself a chat export, it's processed directly - discovery never runs."""
+    def _boom(*_a, **_k):
+        raise AssertionError("_discover_chats must not run for a real export folder")
+
+    monkeypatch.setattr(whispergram, "_discover_chats", _boom)
+    out = tmp_path / "m.md"
+    rc = main(["--dry-run", FIXTURE, "--out", str(out)])
+    assert rc == 0 and out.exists()
+
+
+def test_run_menu_uses_provided_chats_without_rescanning(tmp_path, monkeypatch):
+    """run_menu(chats=...) reuses a pre-discovered list (the auto-menu path) - no second scan."""
+    def _boom(*_a, **_k):
+        raise AssertionError("run_menu must not scan when chats are provided")
+
+    monkeypatch.setattr(whispergram, "_discover_chats", _boom)
+    _write_tg_chat(tmp_path / "a", "A")
+    chats = [{"dir": str(tmp_path / "a"), "platform": "Telegram", "name": "A",
+              "total": 1, "voice": 1, "photo": 0, "video": 0}]
+    answers = iter(["1", "2", "", ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    ns = _parse_args(["--menu", str(tmp_path)])
+    dirs, ns = run_menu(ns, chats=chats)
+    assert dirs == [str(tmp_path / "a")]
 
 
 def test_version_is_semver():

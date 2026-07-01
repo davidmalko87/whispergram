@@ -25,7 +25,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -1082,6 +1082,24 @@ def _chat_summary(export_dir: str) -> Optional[dict]:
     return None
 
 
+def _has_export_json(export_dir: str) -> bool:
+    """True if *export_dir* is itself a chat export - an Instagram thread (its ``message_*.json``)
+    or a Telegram export (a ``*.json`` here whose top level carries a ``messages`` list) - and not
+    just a parent folder that *contains* nested exports. So a bare run only falls into the picker
+    when this folder isn't a chat on its own (a stray non-export ``*.json`` doesn't count)."""
+    if is_instagram_export(export_dir):
+        return True
+    for j in sorted(glob.glob(os.path.join(export_dir, "*.json"))):
+        try:
+            with open(j, encoding="utf-8-sig") as fh:
+                data = json.load(fh)
+        except Exception:
+            continue
+        if isinstance(data.get("messages"), list):
+            return True
+    return False
+
+
 def _discover_chats(root: str) -> List[dict]:
     """Find every Telegram/Instagram chat export under *root*, sorted voice-heavy first."""
     candidates = []
@@ -1123,12 +1141,17 @@ def _ask_yes(prompt: str, default: bool) -> bool:
     return default if not ans else ans.startswith("y")
 
 
-def run_menu(args: argparse.Namespace) -> Tuple[List[str], argparse.Namespace]:
+def run_menu(args: argparse.Namespace,
+             chats: Optional[List[dict]] = None) -> Tuple[List[str], argparse.Namespace]:
     """Interactive picker: scan for chats, let the user choose which + a quality preset, and set the
-    matching options on *args*. Returns ``(selected_dirs, args)`` (empty list = nothing to do)."""
+    matching options on *args*. Returns ``(selected_dirs, args)`` (empty list = nothing to do).
+
+    *chats* may be a pre-discovered list (e.g. from the auto-menu fallback in ``main``) to skip a
+    redundant second scan; when ``None`` the folder is scanned here."""
     root = args.export_dirs[0] if args.export_dirs else "."
-    print(f"Scanning {os.path.abspath(root)} for chats ...")
-    chats = _discover_chats(root)
+    if chats is None:
+        print(f"Scanning {os.path.abspath(root)} for chats ...")
+        chats = _discover_chats(root)
     if not chats:
         print("No Telegram or Instagram exports found here. cd into the folder that contains them.")
         return [], args
@@ -1172,6 +1195,15 @@ def run_menu(args: argparse.Namespace) -> Tuple[List[str], argparse.Namespace]:
     return [c["dir"] for c in chosen], args
 
 
+def _stdin_isatty() -> bool:
+    """Whether we have an interactive terminal to prompt on. Defensive: ``sys.stdin`` can be
+    ``None`` (pythonw / detached) or closed, so never let the check itself raise."""
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def _prevent_sleep():
     """Keep the system awake during a long run so idle-sleep doesn't interrupt it. Windows only
     (``SetThreadExecutionState``); a harmless no-op elsewhere. Returns a restore callable.
@@ -1204,22 +1236,43 @@ def main(argv: Optional[List[str]] = None) -> int:
         _setup_cuda_windows()
         return 0
 
-    if args.menu:
-        if not sys.stdin.isatty():
-            sys.exit("--menu needs an interactive terminal.")
-        try:
-            selected, args = run_menu(args)
-        except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
-            return 0
-        if not selected:
-            return 0
-        args.export_dirs = selected
-
     export_dirs = args.export_dirs or ["."]
     for d in export_dirs:
         if not os.path.isdir(d):
             sys.exit(f"Export folder not found: {os.path.abspath(d)}")
+
+    # Fall into the interactive picker when the target folder isn't a chat export itself but
+    # contains nested exports (e.g. an Instagram `your_instagram_activity` root, or a folder holding
+    # several Telegram `ChatExport_*` folders) - so a bare run there isn't a dead end. The chats we
+    # discover here are handed to run_menu to avoid a second scan. Non-interactively (no TTY) we
+    # can't prompt, so we point the user at --menu instead of hanging.
+    # Only a SINGLE target auto-opens the picker: passing several folders is an explicit queue, so
+    # we don't hijack it into a menu even if none are exports.
+    chats: Optional[List[dict]] = None
+    if not args.menu and len(export_dirs) == 1 and not _has_export_json(export_dirs[0]):
+        chats = _discover_chats(export_dirs[0])
+        if chats:
+            if _stdin_isatty():
+                print(f"\nNo chat export in this folder, but found {len(chats)} nested below "
+                      f"- opening the picker.")
+                args.menu = True
+            else:
+                sys.exit(f"No chat export in {os.path.abspath(export_dirs[0])}, but found "
+                         f"{len(chats)} nested below. Re-run with --menu to pick them, or point "
+                         f"whispergram at a specific chat folder.")
+
+    if args.menu:
+        if not _stdin_isatty():
+            sys.exit("--menu needs an interactive terminal.")
+        try:
+            selected, args = run_menu(args, chats=chats)
+        except (KeyboardInterrupt, EOFError, StopIteration):
+            print("\nCancelled.")
+            return 0
+        if not selected:
+            return 0
+        export_dirs = selected
+
     if args.out and args.out_dir:
         sys.exit("--out and --out-dir are mutually exclusive: --out names one file, "
                  "--out-dir collects a queue as '<chat name>.md'.")
