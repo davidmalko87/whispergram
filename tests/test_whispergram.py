@@ -1233,6 +1233,31 @@ def test_run_menu_uses_provided_chats_without_rescanning(tmp_path, monkeypatch):
     assert dirs == [str(tmp_path / "a")]
 
 
+def test_resolve_compute_type_cpu_and_explicit():
+    assert whispergram._resolve_compute_type("cpu", "auto") == "int8"       # CPU auto -> int8
+    assert whispergram._resolve_compute_type("cpu", "float32") == "float32"  # explicit wins on CPU
+    assert whispergram._resolve_compute_type("cuda", "int8") == "int8"      # explicit wins on GPU
+
+
+def test_resolve_compute_type_gpu_auto_by_vram(monkeypatch):
+    monkeypatch.setattr(whispergram, "_gpu_free_mib", lambda: 8000)
+    assert whispergram._resolve_compute_type("cuda", "auto") == "float16"      # roomy GPU
+    monkeypatch.setattr(whispergram, "_gpu_free_mib", lambda: 4096)
+    assert whispergram._resolve_compute_type("cuda", "auto") == "int8_float16"  # 4 GB card -> int8
+    monkeypatch.setattr(whispergram, "_gpu_free_mib", lambda: None)
+    assert whispergram._resolve_compute_type("cuda", "auto") == "float16"      # unknown -> default
+
+
+def test_gpu_free_mib_none_without_nvidia_smi(monkeypatch):
+    monkeypatch.setattr(whispergram.shutil, "which", lambda _n: None)
+    assert whispergram._gpu_free_mib() is None
+
+
+def test_compute_type_flag_parsed():
+    assert _parse_args(["--compute-type", "int8_float16"]).compute_type == "int8_float16"
+    assert _parse_args([]).compute_type == "auto"                             # default is auto
+
+
 def test_version_is_semver():
     parts = __version__.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
