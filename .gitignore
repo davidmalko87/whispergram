@@ -20,9 +20,12 @@ whispergram-session*.md
 *-session-*.md
 voice_messages/
 video_files/
+video_messages/
+round_video_messages/
 stickers/
 photos/
 files/
+*_thumb.jpg
 
 # --- Python ---
 __pycache__/
