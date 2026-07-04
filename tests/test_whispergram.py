@@ -1273,6 +1273,18 @@ def test_run_menu_shows_version_and_author_banner(tmp_path, monkeypatch, capsys)
     assert "David Malko" in out                               # author shown
 
 
+def test_choose_ocr_langs(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda *a: "1,2,3")
+    assert whispergram._choose_ocr_langs("eng") == "eng+ukr+rus"   # numbers -> codes (sorted)
+    monkeypatch.setattr("builtins.input", lambda *a: "1-3")
+    assert whispergram._choose_ocr_langs("eng") == "eng+ukr+rus"   # a range works too
+    monkeypatch.setattr("builtins.input", lambda *a: "deu+fra")
+    assert whispergram._choose_ocr_langs("eng") == "deu+fra"        # raw codes pass through
+    monkeypatch.setattr("builtins.input", lambda *a: "   ")
+    assert whispergram._choose_ocr_langs("ukr+rus+eng") == "ukr+rus+eng"  # empty keeps current
+    assert "tessdata_best" in capsys.readouterr().out              # points to the full code list
+
+
 def test_main_hints_when_nested_but_not_interactive(tmp_path, monkeypatch):
     """Without a TTY we can't prompt, so main points the user at --menu rather than hanging."""
     _write_tg_chat(tmp_path / "tg", "Alex")

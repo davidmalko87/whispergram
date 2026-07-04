@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.5.0] - 2026-07-01
+
+### Added
+- **OCR-language picker in the menu.** When the picker turns on OCR (the "Everything, best models"
+  preset, or Custom), it now shows a numbered shortlist of 10 common languages — English, Ukrainian,
+  Russian, German, French, Spanish, Polish, Italian, Portuguese, Turkish — so you can pick `1,2,3`
+  instead of typing `ukr+rus+eng`. Free-form Tesseract codes still work, and it links the full
+  ~100-language list ([tessdata_best](https://github.com/tesseract-ocr/tessdata_best), or
+  `tesseract --list-langs` for the ones you have installed).
+
+---
+
 ## [1.4.0] - 2026-07-01
 
 ### Changed

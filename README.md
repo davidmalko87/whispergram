@@ -70,7 +70,7 @@ message exports** — no flag, the format is detected for you.
 | **Queue chats** | Transcribe many exports (Telegram and/or Instagram, mixed) in one command — models load once; `--out-dir` collects the results |
 | **Interactive menu (default)** | In a terminal, `whispergram` opens a picker of all your Telegram **and** Instagram chats — choose which to transcribe with a best-models preset, no flags to remember. `--no-menu` (or any action flag, or a non-interactive/cron run) transcribes directly |
 | **Progress bar** | Live `done/total` + ETA per chat |
-| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 127 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 128 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -514,6 +514,12 @@ that installer and tick them, or drop `ukr.traineddata` + `rus.traineddata`
 ([tessdata_best](https://github.com/tesseract-ocr/tessdata_best)) into a folder and point
 `TESSDATA_PREFIX` at it. Verify with `tesseract --list-langs`.
 
+In the **menu**, when OCR is enabled you don't have to remember the codes: it shows a numbered
+shortlist of common languages (English, Ukrainian, Russian, German, French, …) — pick `1,2,3` — and
+links the full ~100-language list. On the **CLI**, pass them with `--ocr-lang`, joined by `+`
+(e.g. `--ocr-lang ukr+rus+eng`). The codes are Tesseract's 3-letter names (`ukr`, `rus`, `eng`, `deu`,
+…); the complete list is in [tessdata_best](https://github.com/tesseract-ocr/tessdata_best).
+
 ---
 
 ## FAQ
@@ -602,7 +608,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 127 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 128 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)
