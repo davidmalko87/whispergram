@@ -26,7 +26,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -1231,6 +1231,33 @@ def _parse_selection(text: str, n: int) -> List[int]:
     return sorted(i for i in picked if 1 <= i <= n)
 
 
+# A shortlist for the OCR-language picker: globally common languages, English/Ukrainian/Russian
+# first. Any Tesseract code still works via free-form entry.
+_TOP_OCR_LANGS = [
+    ("eng", "English"), ("ukr", "Ukrainian"), ("rus", "Russian"), ("deu", "German"),
+    ("fra", "French"), ("spa", "Spanish"), ("pol", "Polish"), ("ita", "Italian"),
+    ("por", "Portuguese"), ("tur", "Turkish"),
+]
+
+
+def _choose_ocr_langs(current: str) -> str:
+    """Pick OCR (Tesseract) languages interactively: a numbered shortlist, a raw ``+``-joined code
+    string (e.g. ``ukr+rus+eng``), or Enter to keep *current*. Returns a Tesseract lang string."""
+    print("\n  OCR languages (Tesseract) - pick numbers, or type codes joined with '+':")
+    for i, (code, name) in enumerate(_TOP_OCR_LANGS, 1):
+        print(f"    {i:>2}) {code:<4} {name}")
+    print("  Full list of ~100 codes: https://github.com/tesseract-ocr/tessdata_best"
+          "  (or run `tesseract --list-langs` for the ones you have installed)")
+    ans = input(f"  Choose (e.g. 1,2,3 or ukr+rus+eng) [{current}]: ").strip()
+    if not ans:
+        return current
+    if ans.replace(" ", "").replace(",", "").replace("-", "").isdigit():   # a numbered selection
+        picks = _parse_selection(ans.replace(" ", ","), len(_TOP_OCR_LANGS))
+        codes = [_TOP_OCR_LANGS[i - 1][0] for i in picks]
+        return "+".join(codes) or current
+    return ans.replace(" ", "")                                            # raw Tesseract codes
+
+
 def _ask_yes(prompt: str, default: bool) -> bool:
     ans = input(f"  {prompt} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
     return default if not ans else ans.startswith("y")
@@ -1293,11 +1320,10 @@ def run_menu(args: argparse.Namespace,
         args.video_files = _ask_yes("Transcribe regular videos' audio?", True)
         args.ocr = _ask_yes("OCR text from photos/screenshots (needs Tesseract)?", False)
         if args.ocr:
-            args.ocr_lang = input(f"  OCR languages [{args.ocr_lang}]: ").strip() or args.ocr_lang
+            args.ocr_lang = _choose_ocr_langs(args.ocr_lang)
     else:  # 1 - everything, best models
         args.no_describe, args.describe_hq, args.video_files, args.ocr = False, True, True, True
-        args.ocr_lang = (input(f"OCR languages (e.g. ukr+rus+eng) [{args.ocr_lang}]: ").strip()
-                         or args.ocr_lang)
+        args.ocr_lang = _choose_ocr_langs(args.ocr_lang)
 
     default_out = os.path.abspath(os.path.join(root, "transcripts"))
     args.out_dir = input(f"\nOutput folder [{default_out}]: ").strip() or default_out
