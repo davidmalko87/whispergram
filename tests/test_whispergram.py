@@ -1197,6 +1197,82 @@ def test_main_does_not_auto_menu_for_multiple_dirs(tmp_path, monkeypatch):
     assert rc == 0          # both skip (no export), queue completes; discovery never fires
 
 
+def test_main_bare_interactive_opens_menu_for_single_export(tmp_path, monkeypatch):
+    """A bare run in a terminal opens the picker even for a single export folder (menu default)."""
+    _write_tg_chat(tmp_path / "chat", "Alex")
+    out = tmp_path / "out"
+    answers = iter(["all", "2", str(out), ""])            # select all, preset 2, out dir, go
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(True))
+    monkeypatch.setattr(whispergram, "load_model", lambda *a, **k: object())
+    monkeypatch.setattr(whispergram, "make_transcriber", lambda *a, **k: (lambda p: "[x]"))
+    rc = main([str(tmp_path / "chat")])                   # BARE, no flags -> menu opens
+    assert rc == 0
+    assert len(list(out.glob("*.md"))) == 1               # transcribed via the picker
+
+
+def test_main_action_flag_skips_menu(tmp_path, monkeypatch):
+    """Passing a direct-run flag (e.g. --dry-run/--out) skips the picker even in a terminal."""
+    def _boom(*_a, **_k):
+        raise AssertionError("action flags mean a direct run - the picker must not open")
+
+    monkeypatch.setattr(whispergram, "run_menu", _boom)
+    monkeypatch.setattr(whispergram, "_discover_chats", _boom)
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(True))
+    _write_tg_chat(tmp_path / "chat", "Alex")
+    out = tmp_path / "m.md"
+    rc = main(["--dry-run", str(tmp_path / "chat"), "--out", str(out)])
+    assert rc == 0 and out.exists()
+
+
+def test_main_no_menu_forces_direct_run(tmp_path, monkeypatch):
+    """--no-menu transcribes directly even in a terminal, without opening the picker."""
+    def _boom(*_a, **_k):
+        raise AssertionError("--no-menu must skip the picker")
+
+    monkeypatch.setattr(whispergram, "run_menu", _boom)
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(True))
+    monkeypatch.setattr(whispergram, "load_model", lambda *a, **k: object())
+    monkeypatch.setattr(whispergram, "make_transcriber", lambda *a, **k: (lambda p: "[x]"))
+    chat = tmp_path / "chat"
+    _write_tg_chat(chat, "Alex")
+    rc = main(["--no-menu", "--no-describe", str(chat)])   # bare-ish + --no-menu -> direct
+    assert rc == 0 and (chat / "merged_chat.md").exists()
+
+
+def test_main_bare_non_tty_single_export_runs_direct(tmp_path, monkeypatch):
+    """A bare run in a single export folder with NO terminal (cron/pipe) transcribes directly -
+    it must never open the picker or block on input."""
+    def _boom(*_a, **_k):
+        raise AssertionError("no TTY -> the picker must not open")
+
+    monkeypatch.setattr(whispergram, "run_menu", _boom)
+    monkeypatch.setattr(whispergram.sys, "stdin", _FakeStdin(False))   # cron/pipe: no TTY
+    monkeypatch.setattr(whispergram, "load_model", lambda *a, **k: object())
+    monkeypatch.setattr(whispergram, "make_transcriber", lambda *a, **k: (lambda p: "[x]"))
+    monkeypatch.setattr(whispergram, "_hq_available", lambda: False)
+    monkeypatch.setattr(whispergram, "make_describer", lambda *a, **k: None)
+    chat = tmp_path / "chat"
+    _write_tg_chat(chat, "Alex")
+    rc = main([str(chat)])                                # truly bare, non-TTY -> direct run
+    assert rc == 0 and (chat / "merged_chat.md").exists()
+
+
+def test_no_menu_flag_parsed():
+    assert _parse_args(["--no-menu"]).no_menu is True
+    assert _parse_args([]).no_menu is False
+
+
+def test_run_menu_shows_version_and_author_banner(tmp_path, monkeypatch, capsys):
+    _write_tg_chat(tmp_path / "a", "A")
+    answers = iter(["1", "2", "", ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    run_menu(_parse_args(["--menu", str(tmp_path)]))
+    out = capsys.readouterr().out
+    assert f"whispergram v{whispergram.__version__}" in out   # version shown in the banner
+    assert "David Malko" in out                               # author shown
+
+
 def test_main_hints_when_nested_but_not_interactive(tmp_path, monkeypatch):
     """Without a TTY we can't prompt, so main points the user at --menu rather than hanging."""
     _write_tg_chat(tmp_path / "tg", "Alex")
