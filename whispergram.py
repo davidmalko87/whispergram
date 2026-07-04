@@ -26,7 +26,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -937,6 +937,9 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     ap.add_argument("--sort", default="voice", choices=["voice", "messages", "recent", "name"],
                     help="menu order: voice (most voice notes, default), messages (most messages), "
                          "recent (most recent last message), name (A-Z)")
+    ap.add_argument("--no-menu", action="store_true",
+                    help="skip the interactive picker even in a terminal - transcribe directly "
+                         "with the given flags/defaults (for scripts, or a quick default run)")
     ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"],
                     help="cuda (GPU) or cpu; auto-falls back to cpu (default: cuda)")
     ap.add_argument("--model", default="large-v3",
@@ -1233,6 +1236,19 @@ def _ask_yes(prompt: str, default: bool) -> bool:
     return default if not ans else ans.startswith("y")
 
 
+_REPO_URL = "github.com/davidmalko87/whispergram"
+
+
+def _print_banner() -> None:
+    """Print the tool banner (name, version, author) at the top of the interactive picker."""
+    bar = "=" * 50
+    print(bar)
+    print(f"  whispergram v{__version__}")
+    print("  Local, offline Telegram & Instagram transcriber")
+    print(f"  by David Malko - {_REPO_URL}")
+    print(bar)
+
+
 def run_menu(args: argparse.Namespace,
              chats: Optional[List[dict]] = None) -> Tuple[List[str], argparse.Namespace]:
     """Interactive picker: scan for chats, let the user choose which + a quality preset, and set the
@@ -1240,6 +1256,7 @@ def run_menu(args: argparse.Namespace,
 
     *chats* may be a pre-discovered list (e.g. from the auto-menu fallback in ``main``) to skip a
     redundant second scan; when ``None`` the folder is scanned here."""
+    _print_banner()
     root = args.export_dirs[0] if args.export_dirs else "."
     if chats is None:
         print(f"Scanning {os.path.abspath(root)} for chats ...")
@@ -1335,25 +1352,38 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not os.path.isdir(d):
             sys.exit(f"Export folder not found: {os.path.abspath(d)}")
 
-    # Fall into the interactive picker when the target folder isn't a chat export itself but
-    # contains nested exports (e.g. an Instagram `your_instagram_activity` root, or a folder holding
-    # several Telegram `ChatExport_*` folders) - so a bare run there isn't a dead end. The chats we
-    # discover here are handed to run_menu to avoid a second scan. Non-interactively (no TTY) we
-    # can't prompt, so we point the user at --menu instead of hanging.
-    # Only a SINGLE target auto-opens the picker: passing several folders is an explicit queue, so
-    # we don't hijack it into a menu even if none are exports.
+    # A "bare" run passes no flags that signal a direct run (menu-display flags don't count). In a
+    # terminal a bare run opens the picker by default; passing --ocr/--lang/etc. (a direct intent),
+    # or piping with no TTY, goes straight to transcription so cron/scripts are never blocked.
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    menu_neutral = {"--menu", "--no-menu", "--sort"}
+    bare = not any(tok.startswith("-") and tok.split("=", 1)[0] not in menu_neutral
+                   for tok in raw_argv)
+    interactive = _stdin_isatty()
+
+    # Open the interactive picker (unless --no-menu), scanning a single target once:
+    #   * a parent folder that only *contains* exports -> the picker is the only way in (menu if a
+    #     TTY, else a hint; never a dead-end "no .json export found");
+    #   * a single export folder + a bare interactive run -> menu by default, so you pick a preset
+    #     before it starts.
+    # A queue of several folders is an explicit list and is never hijacked into a menu.
     chats: Optional[List[dict]] = None
-    if not args.menu and len(export_dirs) == 1 and not _has_export_json(export_dirs[0]):
-        chats = _discover_chats(export_dirs[0])
-        if chats:
-            if _stdin_isatty():
-                print(f"\nNo chat export in this folder, but found {len(chats)} nested below "
-                      f"- opening the picker.")
+    if not args.menu and not args.no_menu and len(export_dirs) == 1:
+        if not _has_export_json(export_dirs[0]):          # a parent folder
+            chats = _discover_chats(export_dirs[0])
+            if chats:
+                if interactive:
+                    print(f"\nNo chat export in this folder, but found {len(chats)} nested below "
+                          f"- opening the picker.")
+                    args.menu = True
+                else:
+                    sys.exit(f"No chat export in {os.path.abspath(export_dirs[0])}, but found "
+                             f"{len(chats)} nested below. Re-run with --menu to pick them, or "
+                             f"point whispergram at a specific chat folder.")
+        elif interactive and bare:                        # single export, bare, in a terminal
+            chats = _discover_chats(export_dirs[0])
+            if chats:
                 args.menu = True
-            else:
-                sys.exit(f"No chat export in {os.path.abspath(export_dirs[0])}, but found "
-                         f"{len(chats)} nested below. Re-run with --menu to pick them, or point "
-                         f"whispergram at a specific chat folder.")
 
     if args.menu:
         if not _stdin_isatty():

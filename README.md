@@ -68,9 +68,9 @@ message exports** — no flag, the format is detected for you.
 | **Photo/sticker/GIF descriptions** | Captioned automatically by the best installed local model — BLIP (`[describe]`) for photos, or Qwen2-VL (`[describe-hq]`) for photos + stickers + GIFs |
 | **Resumable** | Progress is cached per file — close the terminal or crash, then re-run and it continues where it left off |
 | **Queue chats** | Transcribe many exports (Telegram and/or Instagram, mixed) in one command — models load once; `--out-dir` collects the results |
-| **Interactive menu** | `--menu` scans a folder for all your Telegram **and** Instagram chats and lets you pick what to transcribe with a best-models preset — no flags to remember |
+| **Interactive menu (default)** | In a terminal, `whispergram` opens a picker of all your Telegram **and** Instagram chats — choose which to transcribe with a best-models preset, no flags to remember. `--no-menu` (or any action flag, or a non-interactive/cron run) transcribes directly |
 | **Progress bar** | Live `done/total` + ETA per chat |
-| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 118 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 127 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -169,12 +169,32 @@ Point whispergram at a **single conversation folder** (the one that contains `me
 
 ### 3. Run
 
-**Easiest — the interactive menu** (no flags to remember). From a folder that holds your exports
-(it looks **recursively**, so pointing it at a parent folder with many Telegram and Instagram exports
-works — scanning a real 260-thread Instagram inbox takes ~4 s):
+**Just run `whispergram`** — in a terminal it **opens the interactive picker by default** (no flags to
+remember). Run it in a folder that holds your exports; it looks **recursively**, so a single chat
+folder, a parent folder full of `ChatExport_*`, or an Instagram `your_instagram_activity` root all
+work (scanning a real 260-thread inbox takes ~4 s):
 
 ```bash
-whispergram --menu
+whispergram            # or, without installing: python whispergram.py
+```
+
+You get a picker like this:
+
+```
+==================================================
+  whispergram v1.4.0
+  Local, offline Telegram & Instagram transcriber
+  by David Malko - github.com/davidmalko87/whispergram
+==================================================
+
+Found 3 chat(s):
+
+    #  platform  voice photo video  dates                   name
+    1  Telegram    141    16     0  2026-06-30..2026-07-01  Alex
+    2  Instagram    30     8     2  2026-05-01..2026-06-20  Maria
+    3  Telegram      4    98    12  2024-10-28..2025-04-10  Work
+
+  Which chats? (e.g. 1,3-5 or 'all') [all]:
 ```
 
 It lists every Telegram **and** Instagram chat it finds with platform, name, **date range** and
@@ -182,30 +202,20 @@ voice/photo/video counts (voice-heavy first, or `--sort messages`/`recent`/`name
 exports are easy to tell apart — lets you pick which to do (`1,3-5` or `all`), and offers a one-keystroke
 preset — **"Everything, best models"** is the recommended default (transcribe voice+video, describe
 photos/stickers/GIFs, OCR). That's the simplest way to "transcribe everything with the best models"
-without learning the flags below.
+without learning the flags below. (`--menu` still forces the picker, but you rarely need it.)
 
-> **You don't even have to type `--menu`.** If you run `whispergram` in a folder that isn't a chat
-> export itself but *contains* several — like your Instagram `your_instagram_activity` root, or a
-> folder holding many Telegram `ChatExport_*` folders — it **opens this picker automatically** instead
-> of stopping. (Running directly inside a single export folder transcribes just that chat, as before.)
-
-**Or point it directly at one export folder** — same command for either platform:
+**Skip the picker and transcribe directly** — this happens **automatically when there's no terminal**
+(a cron job or a pipe, so scripts never block), or on demand:
 
 ```bash
-# Telegram:
-whispergram "path/to/ChatExport_2026-06-20"
-
-# Instagram (the folder that contains message_1.json):
-whispergram "your_instagram_activity/messages/inbox/alex_17842…"
+whispergram --no-menu                                           # bare direct run, with defaults
+whispergram "path/to/ChatExport_2026-06-20" --ocr --lang uk     # any action flag also runs direct
+whispergram "your_instagram_activity/messages/inbox/alex_17842…" --no-menu
 ```
 
-Run it with no path from **inside** an export folder to use the current directory:
-
-```bash
-whispergram            # or, without installing: python whispergram.py
-```
-
-The result is `merged_chat.md` in the export folder (or use `--out` / `--out-dir`, below).
+Passing any transcription flag (`--ocr`, `--lang`, `--describe-hq`, `--video-files`, …) is read as
+"I've already chosen — just run it," so the picker doesn't open. The result is `merged_chat.md` in the
+export folder (or use `--out` / `--out-dir`, below).
 
 **Best quality for Instagram** (lots of photos, Reels and GIFs) — install the HQ describer and it's
 used automatically:
@@ -401,7 +411,8 @@ whispergram --out result.md                       # custom output path
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--menu` | off | interactive picker: scan a folder for all Telegram/Instagram chats and choose |
+| `--menu` | auto | interactive picker (scan a folder, choose chats + preset). **On by default in a terminal**; forced by `--menu` |
+| `--no-menu` | off | skip the picker even in a terminal — transcribe directly with flags/defaults (for scripts or a quick run) |
 | `--sort` | `voice` | menu order: `voice`, `messages`, `recent` (last message), or `name` |
 | `--device` | `cuda` | `cuda` or `cpu`; auto-falls back to CPU if the GPU fails |
 | `--model` | `large-v3` | try `large-v3-turbo` or `medium` if CPU is slow |
@@ -591,7 +602,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 118 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 127 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.4.0] - 2026-07-01
+
+### Changed
+- **The interactive picker is now the default in a terminal.** Running `whispergram` in a folder —
+  a single chat, a folder of `ChatExport_*`, or an Instagram export root — opens the chat picker +
+  preset *before* transcribing, so you always choose what to do and with which models. It stays out
+  of the way for automation: a non-interactive run (a cron job or a pipe, no TTY) transcribes
+  directly, and so does any run that passes a transcription flag (`--ocr`, `--lang`, `--describe-hq`,
+  `--video-files`, …) or the new `--no-menu`. (Previously a bare run inside a single export folder
+  transcribed straight away, and the picker only appeared via `--menu` or for a parent folder.)
+
+### Added
+- **`--no-menu`** — skip the picker even in a terminal and transcribe directly with the given
+  flags/defaults (for scripts, or a quick default run).
+- **Version/author banner** at the top of the picker (`whispergram v<x.y.z>`, a one-line description,
+  and `by David Malko - github.com/davidmalko87/whispergram`), matching the sibling tools' style.
+
+---
+
 ## [1.3.1] - 2026-07-01
 
 ### Fixed
