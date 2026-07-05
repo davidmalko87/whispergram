@@ -1336,6 +1336,55 @@ def test_resolve_compute_type_gpu_auto_by_vram(monkeypatch):
     assert whispergram._resolve_compute_type("cuda", "auto") == "float16"      # unknown -> default
 
 
+def test_format_reactions():
+    tg = [
+        {"type": "emoji", "emoji": "👍", "count": 2, "recent": [{"from": "Bob"}, {"from": "Mia"}]},
+        {"type": "custom_emoji", "document_id": "123", "count": 1, "recent": [{"from": "Al"}]},
+    ]
+    assert whispergram._format_reactions(tg) == "👍 x2 (Bob, Mia), [custom] (Al)"
+    one = [{"emoji": "❤", "count": 1, "recent": []}]
+    assert whispergram._format_reactions(one) == "❤"          # count 1, no authors -> bare emoji
+    assert whispergram._format_reactions([]) == "" and whispergram._format_reactions(None) == ""
+
+
+def test_reply_target_label():
+    assert whispergram._reply_target_label({"from": "Al", "text": "hi there"}) == 'Al: "hi there"'
+    long = whispergram._reply_target_label({"from": "Al", "text": "x" * 60})
+    assert long.startswith('Al: "') and long.endswith('..."')          # truncated
+    voice = {"from": "Al", "media_type": "voice_message"}
+    assert whispergram._reply_target_label(voice) == 'Al: "voice"'     # media -> kind label
+    assert whispergram._reply_target_label(None) == ""
+
+
+def test_build_transcript_reply_and_reactions():
+    msgs = [
+        {"type": "message", "id": 1, "date": "2026-06-20T10:00:00", "from": "You",
+         "text": "got the files?"},
+        {"type": "message", "id": 2, "date": "2026-06-20T10:01:00", "from": "Al", "text": "yes",
+         "reply_to_message_id": 1,
+         "reactions": [{"emoji": "👍", "count": 1, "recent": [{"from": "You"}]}]},
+    ]
+    lines, _ = build_transcript(msgs, "/x", lambda p: "[x]")
+    assert lines[0] == "[2026-06-20 10:00] You: got the files?"
+    assert lines[1] == ('[2026-06-20 10:01] Al: yes | reply to You: "got the files?" '
+                        "| reactions: 👍 (You)")
+
+
+def test_instagram_reactions_normalized_and_rendered(tmp_path):
+    d = tmp_path / "thread"
+    d.mkdir()
+    (d / "message_1.json").write_text(json.dumps({
+        "participants": [{"name": "A"}, {"name": "B"}], "title": "T",
+        "messages": [
+            {"sender_name": "A", "timestamp_ms": 1000, "content": "hey",
+             "reactions": [{"reaction": "😂", "actor": "B"}, {"reaction": "😂", "actor": "A"}]},
+        ],
+    }))
+    msgs, _ = whispergram._normalize_instagram(str(d))
+    lines, _ = build_transcript(msgs, str(d), lambda p: "[x]")
+    assert any("| reactions: 😂 x2 (B, A)" in ln for ln in lines)   # grouped, both actors
+
+
 def test_gpu_free_mib_none_without_nvidia_smi(monkeypatch):
     monkeypatch.setattr(whispergram.shutil, "which", lambda _n: None)
     assert whispergram._gpu_free_mib() is None

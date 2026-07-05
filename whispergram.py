@@ -26,7 +26,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -98,6 +98,26 @@ def _ig_media_path(uri: str) -> str:
     return "/".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
 
 
+def _ig_reactions(raw) -> list:
+    """Convert Instagram reactions ``[{'reaction': e, 'actor': a}, ...]`` to the Telegram-ish shape
+    ``[{'emoji': e, 'count': n, 'recent': [{'from': a}, ...]}, ...]`` (grouped by emoji, mojibake
+    repaired) so one reaction renderer serves both platforms. Instagram exports carry no reply link.
+    """
+    grouped: dict = {}
+    for r in raw or []:
+        if not isinstance(r, dict):
+            continue
+        emoji = _fix_mojibake(r.get("reaction") or "").strip()
+        if not emoji:
+            continue
+        actor = _fix_mojibake(r.get("actor") or "").strip()
+        grouped.setdefault(emoji, [])
+        if actor:
+            grouped[emoji].append(actor)
+    return [{"emoji": e, "count": len(actors) or 1, "recent": [{"from": a} for a in actors]}
+            for e, actors in grouped.items()]
+
+
 def is_instagram_export(export_dir: str) -> bool:
     """True if *export_dir* looks like an Instagram DM thread export (a ``message_1.json`` whose
     messages carry ``sender_name``/``timestamp_ms`` rather than Telegram's ``type``/``date``)."""
@@ -141,6 +161,9 @@ def _normalize_instagram(export_dir: str) -> Tuple[List[dict], str]:
         ts = _ig_timestamp(m.get("timestamp_ms", 0))
         who = _fix_mojibake(m.get("sender_name") or "Unknown")
         base = {"type": "message", "date": ts, "from": who}
+        reacts = _ig_reactions(m.get("reactions"))
+        if reacts:
+            base["reactions"] = reacts
 
         def media_msg(kind, uri):
             return {**base, "media_type": kind, "file": _ig_media_path(uri)}
@@ -276,6 +299,58 @@ def _is_describable(path: str) -> bool:
     return os.path.splitext(path)[1].lower() not in _UNDESCRIBABLE_EXT
 
 
+def _reply_target_label(target: Optional[dict]) -> str:
+    """Short ``author: "snippet"`` label for a replied-to message (author + a trimmed preview of its
+    text, or its media kind when it has none)."""
+    if not isinstance(target, dict):
+        return ""
+    who = target.get("from") or "Unknown"
+    text = " ".join(extract_text(target).split())
+    if not text:
+        text = _KIND_LABEL.get(target.get("media_type")) or media_marker(target) or "message"
+    if len(text) > 40:
+        text = text[:40].rstrip() + "..."
+    return f'{who}: "{text}"'
+
+
+def _format_reactions(reactions) -> str:
+    """Render a reactions list (Telegram or normalized-Instagram shape) as
+    ``emoji xN (author, author), emoji (author)``. Returns ``''`` if there are none."""
+    if not isinstance(reactions, list):
+        return ""
+    parts = []
+    for r in reactions:
+        if not isinstance(r, dict):
+            continue
+        emoji = r.get("emoji") or r.get("reaction")
+        if not emoji:
+            emoji = "[custom]" if (r.get("type") == "custom_emoji" or r.get("document_id")) else "?"
+        count = r.get("count") or 1
+        authors = [x.get("from") for x in (r.get("recent") or [])
+                   if isinstance(x, dict) and x.get("from")]
+        label = f"{emoji} x{count}" if count and count > 1 else str(emoji)
+        if authors:
+            label += f" ({', '.join(authors)})"
+        parts.append(label)
+    return ", ".join(parts)
+
+
+def _message_annotations(msg: dict, by_id: dict) -> str:
+    """The ``| reply to ...`` and ``| reactions: ...`` suffix appended to a message's line.
+    Reply resolves *reply_to_message_id* against *by_id* (Telegram); Instagram exports have no reply
+    reference. Reactions come from either platform (authors included when the export has them)."""
+    extra = ""
+    rid = msg.get("reply_to_message_id")
+    if rid is not None and rid in by_id:
+        label = _reply_target_label(by_id.get(rid))
+        if label:
+            extra += f" | reply to {label}"
+    reacts = _format_reactions(msg.get("reactions"))
+    if reacts:
+        extra += f" | reactions: {reacts}"
+    return extra
+
+
 def build_transcript(
     messages: Iterable[dict],
     export_dir: str,
@@ -297,6 +372,8 @@ def build_transcript(
     Returns ``(lines, stats)`` where ``stats`` counts each outcome category.
     """
     transcribe_types = _transcribe_types(audio_files, video_files)
+    messages = list(messages)
+    by_id = {m["id"]: m for m in messages if isinstance(m, dict) and m.get("id") is not None}
     lines: List[str] = []
     stats: Counter = Counter()
 
@@ -309,6 +386,7 @@ def build_transcript(
         who = msg.get("from") or "Unknown"
         text = extract_text(msg)
         media_type = msg.get("media_type")
+        extra = _message_annotations(msg, by_id)   # ' | reply to ...' and ' | reactions: ...'
 
         if media_type in transcribe_types:
             duration = msg.get("duration_seconds", "?")
@@ -325,7 +403,7 @@ def build_transcript(
             line = f"[{ts}] {who} ({_KIND_LABEL[media_type]} {duration}s): {body}"
             if text:
                 line += f" | caption: {text}"
-            lines.append(line)
+            lines.append(line + extra)
             continue
 
         if describe is not None and msg.get("photo"):
@@ -339,7 +417,7 @@ def build_transcript(
                     line = f"[{ts}] {who} (photo, {photo_label}): {extracted}"
                     if text:
                         line += f" | caption: {text}"
-                    lines.append(line)
+                    lines.append(line + extra)
                     stats["described"] += 1
                     continue
             # photo missing or nothing extracted -> fall through to the plain (photo) marker
@@ -359,7 +437,7 @@ def build_transcript(
                     line = f"[{ts}] {who} ({marker}, described): {extracted}"
                     if text:
                         line += f" | caption: {text}"
-                    lines.append(line)
+                    lines.append(line + extra)
                     stats["described"] += 1
                     continue
             # missing or nothing extracted -> fall through to the plain marker
@@ -372,12 +450,12 @@ def build_transcript(
             line = f"[{ts}] {who} ({marker})"
             if text:
                 line += f": {text}"
-            lines.append(line)
+            lines.append(line + extra)
             stats["media"] += 1
             continue
 
         if text:
-            lines.append(f"[{ts}] {who}: {text}")
+            lines.append(f"[{ts}] {who}: {text}{extra}")
             stats["text"] += 1
         else:
             stats["empty"] += 1

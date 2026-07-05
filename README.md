@@ -59,6 +59,7 @@ message exports** — no flag, the format is detected for you.
 | **Lossless mapping** | Stickers, photos, animations/GIFs, documents, music, locations, polls, contacts and shared Reels appear as markers — nothing content-bearing is dropped |
 | **Handles missing media** | Notes excluded from the export are clearly marked `[not exported]`, never fed to the model |
 | **All text shapes** | Reconstructs plain, rich, and entity-based message text (links, mentions, custom emoji) |
+| **Replies & reactions** | Each line notes what it replies to (`\| reply to <author>: "…"`, Telegram) and its reactions with the reactors' names (`\| reactions: 👍 x2 (…)`, both platforms) |
 | **Instagram encoding repair** | Instagram mangles non-Latin text (mojibake); whispergram repairs it so Ukrainian/Russian and emoji read correctly, and merges paginated `message_*.json` files chronologically |
 | **Dry-run** | Preview the full merge with `--dry-run` — no model download, no GPU, instant |
 | **GPU or CPU** | CUDA with automatic CPU fallback; a one-command Windows CUDA fix is built in |
@@ -70,7 +71,7 @@ message exports** — no flag, the format is detected for you.
 | **Queue chats** | Transcribe many exports (Telegram and/or Instagram, mixed) in one command — models load once; `--out-dir` collects the results |
 | **Interactive menu (default)** | In a terminal, `whispergram` opens a picker of all your Telegram **and** Instagram chats — choose which to transcribe with a best-models preset, no flags to remember. `--no-menu` (or any action flag, or a non-interactive/cron run) transcribes directly |
 | **Progress bar** | Live `done/total` + ETA per chat |
-| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 128 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 132 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -304,8 +305,13 @@ combined with `--out-dir`).
 | Photo + `--ocr` | `[time] sender (photo, described): <scene> \| text: <text found in the image>` |
 | Photo + `--ocr --no-describe` | `[time] sender (photo, text): <text found in the image>` |
 | Sticker / GIF + `--describe-hq` | `[time] sender (sticker 😅, described): …` · `(animation, described): …` |
+| Reply (Telegram) | `[time] sender: message \| reply to <author>: "<snippet>"` |
+| Reactions (either platform) | `[time] sender: message \| reactions: 👍 x2 (Bob, Mia), ❤️ (Al)` |
 
 Markers can be turned off with `--no-media-markers` (voice/video notes are always transcribed).
+**Replies and reactions** are appended to a line as `| reply to <author>: "…"` and
+`| reactions: <emoji> x<count> (<authors>)` — Telegram carries both (custom emoji show as `[custom]`);
+Instagram exports carry reactions (with the reactor's name) but no reply reference.
 
 ---
 
@@ -388,7 +394,9 @@ itself — not from a lack of effort in the tool:
 | Photo/sticker/GIF descriptions | Best-effort, local | Captions are a short, English scene *gist*, not literal fact; local models caption cartoons/memes roughly (`--describe-hq` is much better but heavier); `--no-describe` to skip |
 | Speaker labels | Sender only | Each note is attributed to its sender; no in-audio diarization |
 | Timestamps | Minute resolution | Both platforms are rendered to `YYYY-MM-DD hh:mm`; seconds are not shown |
-| Reactions / edits / replies | Not represented | The merged file is a clean reading transcript, not a full forensic dump |
+| Replies | Telegram only | Shown as `\| reply to <author>: "…"`; Instagram exports have no reply reference |
+| Reactions | Shown (both platforms) | `\| reactions: <emoji> x<count> (<authors>)`; Telegram custom emoji show as `[custom]` |
+| Edits | Not marked | An edited message shows its final text, without an "edited" flag |
 | Transcription accuracy | Model-dependent | `large-v3` is best for uk/ru; `--lang` forces a language if auto-detect slips |
 
 ---
@@ -608,7 +616,7 @@ whispergram/
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 128 offline tests — no model download or GPU required
+    ├── test_whispergram.py    # 132 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)

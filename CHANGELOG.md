@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.6.0] - 2026-07-05
+
+### Added
+- **Replies and reactions in the merged file.** Each message line now notes what it replies to and
+  which reactions it got, with authors:
+  - **Replies** (Telegram): `… | reply to <author>: "<snippet>"` — resolved from `reply_to_message_id`
+    against the message ids in the export. (Instagram exports contain no reply reference.)
+  - **Reactions** (both platforms): `… | reactions: 👍 x2 (Bob, Mia), ❤️ (Al)` — grouped by emoji with
+    counts and the reactors' names (Telegram `recent`, Instagram `actor`). Telegram custom emoji show
+    as `[custom]`.
+  Verified on a real Telegram export: all 45 replies resolved and all 42 reactions rendered.
+
+---
+
 ## [1.5.0] - 2026-07-01
 
 ### Added
