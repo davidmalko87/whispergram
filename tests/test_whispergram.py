@@ -48,7 +48,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "sample_export")
 EXPECTED_FIXTURE_LINES = [
     "[2026-06-20 12:33] Alex: hey, did you get the files?",
     "[2026-06-20 12:33] You: yep, check https://example.com thanks",
-    "[2026-06-20 12:34] Alex (voice 6s): [not exported]",
+    "[2026-06-20 12:34] Alex (voice 6s): [not exported] | forwarded from Sam",
     "[2026-06-20 12:35] Alex (video-note 8s): [not exported]",
     "[2026-06-20 12:35] You (sticker OK)",
     "[2026-06-20 12:36] Alex (photo): the whiteboard from today",
@@ -1368,6 +1368,60 @@ def test_build_transcript_reply_and_reactions():
     assert lines[0] == "[2026-06-20 10:00] You: got the files?"
     assert lines[1] == ('[2026-06-20 10:01] Al: yes | reply to You: "got the files?" '
                         "| reactions: 👍 (You)")
+
+
+def test_forward_author():
+    fa = whispergram._forward_author
+    assert fa({"from": "B", "text": "hi"}) is None                    # not a forward
+    assert fa({"forwarded_from": "Al", "forwarded_from_id": "user1"}) == "Al"
+    assert fa({"forwarded_from": " Al "}) == "Al"                     # hidden forward: name only
+    assert fa({"forwarded_from": None}) == "Unknown"                  # deleted account -> null
+    assert fa({"forwarded_from": ""}) == "Unknown"
+    assert fa({"forwarded_from": {"odd": "shape"}}) == "Unknown"      # never crashes on bad JSON
+
+
+def test_build_transcript_forwarded_at_every_line_site(tmp_path):
+    """Issue #32: a forwarded message keeps the forwarder as sender AND names the original author,
+    on every line shape (transcribed note, described photo/media, marker, plain text)."""
+    for name in ("v.ogg", "p.jpg", "s.webp"):
+        (tmp_path / name).write_bytes(b"x")
+    fwd = {"forwarded_from": "A", "forwarded_from_id": "user1"}
+    base = {"type": "message", "date": "2026-08-05T13:10:00", "from": "B"}
+    msgs = [
+        {**base, **fwd, "id": 1, "media_type": "voice_message", "duration_seconds": 42,
+         "file": "v.ogg"},
+        {**base, **fwd, "id": 2, "photo": "p.jpg"},
+        {**base, **fwd, "id": 3, "media_type": "sticker", "sticker_emoji": "OK", "file": "s.webp"},
+        {**base, **fwd, "id": 4, "file_name": "r.pdf", "file": "(File not included.)"},
+        {**base, **fwd, "id": 5, "text": "decision: ship it"},
+        {**base, "id": 6, "text": "my own words"},                     # not forwarded: unchanged
+    ]
+    lines, stats = build_transcript(
+        msgs, str(tmp_path), lambda p: "<tx>", describe=lambda p: "<ocr>",
+        media_describe=lambda p: "<desc>", describe_media=frozenset({"sticker"}),
+    )
+    assert lines == [
+        "[2026-08-05 13:10] B (voice 42s): <tx> | forwarded from A",
+        "[2026-08-05 13:10] B (photo, text): <ocr> | forwarded from A",
+        "[2026-08-05 13:10] B (sticker OK, described): <desc> | forwarded from A",
+        "[2026-08-05 13:10] B (file: r.pdf [not exported]) | forwarded from A",
+        "[2026-08-05 13:10] B: decision: ship it | forwarded from A",
+        "[2026-08-05 13:10] B: my own words",
+    ]
+    assert sum(stats.values()) == len(msgs)                               # zero-drop invariant
+
+
+def test_forwarded_annotation_precedes_reply_and_reactions():
+    msgs = [
+        {"type": "message", "id": 1, "date": "2026-06-20T10:00:00", "from": "You", "text": "ok?"},
+        {"type": "message", "id": 2, "date": "2026-06-20T10:01:00", "from": "Al",
+         "forwarded_from": None, "media_type": "video_message", "duration_seconds": 5,
+         "file": "(File not included.)", "reply_to_message_id": 1,
+         "reactions": [{"emoji": "👍", "count": 1, "recent": [{"from": "You"}]}]},
+    ]
+    lines, _ = build_transcript(msgs, "/x", lambda p: "[x]")
+    assert lines[1] == ('[2026-06-20 10:01] Al (video-note 5s): [not exported] '
+                        '| forwarded from Unknown | reply to You: "ok?" | reactions: 👍 (You)')
 
 
 def test_instagram_reactions_normalized_and_rendered(tmp_path):

@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.6.1] - 2026-09-26
+
+### Fixed
+- **Forwarded Telegram messages no longer misattribute the speaker** ([#32](https://github.com/davidmalko87/whispergram/issues/32)).
+  A voice note forwarded by User B but recorded by User A used to read as if B had said it. Every
+  forwarded message — voice/video notes, text, photos, files and other media — now keeps the
+  forwarder as the line's sender **and** names the original author:
+  `[time] B (voice 42s): <transcript> | forwarded from A`. The suffix precedes `| reply to …` and
+  `| reactions: …`. Read from Telegram's `forwarded_from` (also for hidden-account forwards, which
+  carry a name but no id); a deleted account's `null` shows as `Unknown`. Instagram exports carry no
+  forward reference.
+  Verified on real Telegram exports: all 10 forwards (5 video notes, 3 photos, 2 texts) annotated;
+  every other line of 2,460 is byte-identical to 1.6.0.
+
+---
+
 ## [1.6.0] - 2026-07-05
 
 ### Added

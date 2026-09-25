@@ -26,6 +26,8 @@
       "date": "2026-06-20T12:34:10",
       "from": "Alex",
       "from_id": "user1",
+      "forwarded_from": "Sam",
+      "forwarded_from_id": "user3",
       "media_type": "voice_message",
       "duration_seconds": 6,
       "file": "(File not included. Change data exporting settings to download.)",
