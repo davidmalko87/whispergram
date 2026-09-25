@@ -59,7 +59,7 @@ message exports** — no flag, the format is detected for you.
 | **Lossless mapping** | Stickers, photos, animations/GIFs, documents, music, locations, polls, contacts and shared Reels appear as markers — nothing content-bearing is dropped |
 | **Handles missing media** | Notes excluded from the export are clearly marked `[not exported]`, never fed to the model |
 | **All text shapes** | Reconstructs plain, rich, and entity-based message text (links, mentions, custom emoji) |
-| **Replies & reactions** | Each line notes what it replies to (`\| reply to <author>: "…"`, Telegram) and its reactions with the reactors' names (`\| reactions: 👍 x2 (…)`, both platforms) |
+| **Replies, reactions & forwards** | Each line notes what it replies to (`\| reply to <author>: "…"`, Telegram), its reactions with the reactors' names (`\| reactions: 👍 x2 (…)`, both platforms), and — for a forward — the original author (`\| forwarded from <author>`, Telegram), so a forwarded voice note is never attributed to the forwarder |
 | **Instagram encoding repair** | Instagram mangles non-Latin text (mojibake); whispergram repairs it so Ukrainian/Russian and emoji read correctly, and merges paginated `message_*.json` files chronologically |
 | **Dry-run** | Preview the full merge with `--dry-run` — no model download, no GPU, instant |
 | **GPU or CPU** | CUDA with automatic CPU fallback; a one-command Windows CUDA fix is built in |
@@ -306,12 +306,15 @@ combined with `--out-dir`).
 | Photo + `--ocr --no-describe` | `[time] sender (photo, text): <text found in the image>` |
 | Sticker / GIF + `--describe-hq` | `[time] sender (sticker 😅, described): …` · `(animation, described): …` |
 | Reply (Telegram) | `[time] sender: message \| reply to <author>: "<snippet>"` |
+| Forwarded (Telegram) | `[time] forwarder (voice 42s): <transcript> \| forwarded from <original author>` |
 | Reactions (either platform) | `[time] sender: message \| reactions: 👍 x2 (Bob, Mia), ❤️ (Al)` |
 
 Markers can be turned off with `--no-media-markers` (voice/video notes are always transcribed).
-**Replies and reactions** are appended to a line as `| reply to <author>: "…"` and
-`| reactions: <emoji> x<count> (<authors>)` — Telegram carries both (custom emoji show as `[custom]`);
-Instagram exports carry reactions (with the reactor's name) but no reply reference.
+**Forwards, replies and reactions** are appended to a line as `| forwarded from <author>`,
+`| reply to <author>: "…"` and `| reactions: <emoji> x<count> (<authors>)` — Telegram carries all
+three (custom emoji show as `[custom]`); Instagram exports carry reactions (with the reactor's name)
+but no reply or forward reference. On a forward the line's sender is whoever forwarded it into the
+chat, and `forwarded from` names who originally wrote or recorded it (`Unknown` for a deleted account).
 
 ---
 
@@ -392,9 +395,10 @@ itself — not from a lack of effort in the tool:
 | Music / `audio_file` (Telegram) | Off by default | Opt in with `--audio-files`; songs are otherwise not run through ASR. (Instagram voice notes are *not* affected — they transcribe by default.) |
 | Photo OCR | Text-in-image only | `--ocr` reads visible text (great for screenshots), not a description of the scene; needs Tesseract + language packs |
 | Photo/sticker/GIF descriptions | Best-effort, local | Captions are a short, English scene *gist*, not literal fact; local models caption cartoons/memes roughly (`--describe-hq` is much better but heavier); `--no-describe` to skip |
-| Speaker labels | Sender only | Each note is attributed to its sender; no in-audio diarization |
+| Speaker labels | Sender only | Each note is attributed to its sender (a Telegram forward also names its original author); no in-audio diarization |
 | Timestamps | Minute resolution | Both platforms are rendered to `YYYY-MM-DD hh:mm`; seconds are not shown |
 | Replies | Telegram only | Shown as `\| reply to <author>: "…"`; Instagram exports have no reply reference |
+| Forwards | Telegram only | Shown as `\| forwarded from <author>` (`Unknown` if the author's account was deleted); Instagram exports have no forward reference |
 | Reactions | Shown (both platforms) | `\| reactions: <emoji> x<count> (<authors>)`; Telegram custom emoji show as `[custom]` |
 | Edits | Not marked | An edited message shows its final text, without an "edited" flag |
 | Transcription accuracy | Model-dependent | `large-v3` is best for uk/ru; `--lang` forces a language if auto-detect slips |

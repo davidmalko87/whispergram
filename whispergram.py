@@ -26,7 +26,7 @@ import sys
 from collections import Counter
 from typing import Callable, Iterable, List, Optional, Tuple
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 
 # Telegram media types whose audio we can transcribe, mapped to their display label.
 _KIND_LABEL = {
@@ -335,11 +335,29 @@ def _format_reactions(reactions) -> str:
     return ", ".join(parts)
 
 
+def _forward_author(msg: dict) -> Optional[str]:
+    """Original author of a forwarded Telegram message, or ``None`` if it isn't a forward.
+
+    The line's sender is whoever forwarded it into this chat, so without this a forwarded voice
+    note reads as if the forwarder spoke it. Telegram writes ``forwarded_from`` only on forwards,
+    and as ``null`` when the author's name is gone (deleted account) - so the key's presence, not
+    its truthiness, marks a forward. Instagram exports carry no forward reference.
+    """
+    if "forwarded_from" not in msg:
+        return None
+    name = msg["forwarded_from"]
+    return (name.strip() if isinstance(name, str) else "") or "Unknown"
+
+
 def _message_annotations(msg: dict, by_id: dict) -> str:
-    """The ``| reply to ...`` and ``| reactions: ...`` suffix appended to a message's line.
-    Reply resolves *reply_to_message_id* against *by_id* (Telegram); Instagram exports have no reply
-    reference. Reactions come from either platform (authors included when the export has them)."""
+    """The ``| forwarded from ...``, ``| reply to ...`` and ``| reactions: ...`` suffix appended to
+    a message's line. Forward and reply are Telegram-only (reply resolves *reply_to_message_id*
+    against *by_id*); reactions come from either platform (authors included when the export has
+    them)."""
     extra = ""
+    fwd = _forward_author(msg)
+    if fwd is not None:
+        extra += f" | forwarded from {fwd}"
     rid = msg.get("reply_to_message_id")
     if rid is not None and rid in by_id:
         label = _reply_target_label(by_id.get(rid))
@@ -386,7 +404,7 @@ def build_transcript(
         who = msg.get("from") or "Unknown"
         text = extract_text(msg)
         media_type = msg.get("media_type")
-        extra = _message_annotations(msg, by_id)   # ' | reply to ...' and ' | reactions: ...'
+        extra = _message_annotations(msg, by_id)   # ' | forwarded from ... | reply to ... | ...'
 
         if media_type in transcribe_types:
             duration = msg.get("duration_seconds", "?")
