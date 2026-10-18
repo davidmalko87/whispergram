@@ -49,3 +49,39 @@ jobs:
 
       - name: Verify CLI help loads
         run: python whispergram.py --help
+
+  package:
+    name: Build, check and install the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+
+      - name: Install the wheel and run the console script
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install dist/*.whl
+          cd /tmp && /tmp/wheel-venv/bin/whispergram --help
+
+      - name: Decode audio through the installed faster-whisper (catches PyAV breaks)
+        run: |
+          /tmp/wheel-venv/bin/python - <<'PY'
+          import math, struct, wave
+          with wave.open("/tmp/tone.wav", "wb") as w:
+              w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+              w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * i / 16000))) for i in range(16000)))
+          from faster_whisper.audio import decode_audio
+          samples = decode_audio("/tmp/tone.wav")
+          assert len(samples) > 0
+          print("decoded samples:", len(samples))
+          PY
