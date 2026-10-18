@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.6.2] - 2026-10-18
+
+### Fixed
+- **Every voice/video note came out as `[transcription failed]` on fresh installs.** PyAV 19
+  (released 2026-09/10) removed the `metadata_errors` argument of `av.open()`, which faster-whisper
+  1.2.1 still passes, so audio decoding raised `TypeError` and the run still exited 0. whispergram
+  now requires `av>=11,<19`. If a run already hit this, delete `.whispergram_cache.json` in that
+  export folder (failed results are cached).
+
+### Changed
+- README: PyPI/pipx install and upgrade, the `[ocr]` extra, where output, cache and model weights
+  live; no system ffmpeg is needed (PyAV bundles it).
+- CI builds the sdist and wheel, runs `twine check`, installs the wheel with its real dependencies
+  and decodes a generated tone through faster-whisper, so a dependency break like this fails CI.
+
+---
+
 ## [1.6.1] - 2026-09-26
 
 ### Fixed

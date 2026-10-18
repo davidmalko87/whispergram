@@ -117,10 +117,10 @@ No separate **ffmpeg** install is needed: audio is decoded by PyAV, which `faste
 with FFmpeg bundled. The [Tesseract](https://github.com/tesseract-ocr/tesseract) binary is needed only
 for `--ocr` (see [Ukrainian / Russian OCR](#ukrainian--russian-ocr)).
 
-> **Known issue (Python 3.12+):** PyAV 19, released after whispergram 1.6.1, breaks faster-whisper's
-> audio decoding, so every voice/video note comes out as `[transcription failed]`. Until a fixed
-> release ships, pin it with `pip install "av<19"` (pipx: `pipx inject whispergram "av<19"`). If a run
-> already hit this, delete `.whispergram_cache.json` in that export folder, because failures are cached too.
+> **Upgrading from 1.6.1:** PyAV 19 (released after 1.6.1) breaks faster-whisper's audio decoding,
+> so a fresh 1.6.1 install turns every voice/video note into `[transcription failed]`. 1.6.2 pins
+> `av<19` — run `pip install -U whispergram` (pipx: `pipx upgrade whispergram`). If a run already hit
+> this, delete `.whispergram_cache.json` in that export folder, because failures are cached too.
 
 > **Where files live:** there's no config file — everything is relative to the folder you run
 > `whispergram` in, or the export folder(s) you pass. Every export folder it processes gets a
@@ -218,7 +218,7 @@ You get a picker like this:
 
 ```
 ==================================================
-  whispergram v1.6.1
+  whispergram v1.6.2
   Local, offline Telegram & Instagram transcriber
   by David Malko - github.com/davidmalko87/whispergram
 ==================================================
