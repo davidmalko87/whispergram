@@ -54,6 +54,8 @@ All three must be updated together in the same commit as the change that warrant
 2. Push to `master`.
 3. Create a GitHub Release with tag `vX.Y.Z` (the leading `v` matters), titled `vX.Y.Z`, with
    the new `CHANGELOG.md` section as the body.
-4. Publishing the release triggers `.github/workflows/publish.yml`, which verifies the tag matches
-   `__version__`, then builds and uploads to PyPI via trusted publishing. Do **not** mark it a
-   pre-release or skip the `v`.
+4. Pushing the `vX.Y.Z` tag (creating the GitHub Release does this) triggers
+   `.github/workflows/publish.yml`, which verifies the tag matches `__version__`, then builds and
+   uploads to PyPI via trusted publishing. Any pushed `v*` tag publishes — a draft or pre-release
+   doesn't stop it once the tag exists — so only push a `v` tag for a real release, and don't skip
+   the `v`.

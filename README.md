@@ -4,7 +4,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/whispergram.svg)](https://pypi.org/project/whispergram/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/whispergram.svg)](https://pypi.org/project/whispergram/)
 [![Python](https://img.shields.io/pypi/pyversions/whispergram.svg?logo=python&logoColor=white)](https://pypi.org/project/whispergram/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/davidmalko87/whispergram/blob/master/LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
 [![Chats](https://img.shields.io/badge/chats-Telegram%20%7C%20Instagram-success.svg)](#2-export-your-chat)
 [![Offline](https://img.shields.io/badge/100%25-local%20%26%20offline-success.svg)](#%EF%B8%8F-privacy)
@@ -29,7 +29,7 @@ Every line is tagged by sender and timestamp — voice, video **and photos** tur
 [2026-06-20 12:47] Alex (sticker 👍)
 ```
 
-> Photos become text two ways: a local vision model captions the scene (on by default), and `--ocr` reads any text in the image.
+> Photos become text two ways: a local vision model captions the scene (automatic once the `[describe]` or `[describe-hq]` extra is installed), and `--ocr` reads any text in the image.
 
 ---
 
@@ -69,9 +69,9 @@ message exports** — no flag, the format is detected for you.
 | **Photo/sticker/GIF descriptions** | Captioned automatically by the best installed local model — BLIP (`[describe]`) for photos, or Qwen2-VL (`[describe-hq]`) for photos + stickers + GIFs |
 | **Resumable** | Progress is cached per file — close the terminal or crash, then re-run and it continues where it left off |
 | **Queue chats** | Transcribe many exports (Telegram and/or Instagram, mixed) in one command — models load once; `--out-dir` collects the results |
-| **Interactive menu (default)** | In a terminal, `whispergram` opens a picker of all your Telegram **and** Instagram chats — choose which to transcribe with a best-models preset, no flags to remember. `--no-menu` (or any action flag, or a non-interactive/cron run) transcribes directly |
+| **Interactive menu (default)** | In a terminal, `whispergram` opens a picker of all your Telegram **and** Instagram chats — choose which to transcribe with a best-models preset, no flags to remember. `--no-menu` transcribes directly — and so does any action flag or a non-interactive/cron run when pointed at a single chat folder |
 | **Progress bar** | Live `done/total` + ETA per chat |
-| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 132 offline tests on the Python 3.9–3.13 CI matrix |
+| **Round-trip verified** | Rich synthetic exports run through the full pipeline and are diffed line-for-line; validated against real Telegram **and** Instagram exports (see below); 135 offline tests on the Python 3.9–3.13 CI matrix |
 
 ---
 
@@ -79,27 +79,58 @@ message exports** — no flag, the format is detected for you.
 
 ### 1. Install
 
-**Via PyPI (recommended):**
+**Via PyPI (recommended)** — provides the `whispergram` command:
 
 ```bash
 pip install whispergram
+pip install "whispergram[ocr]"           # optional: --ocr text from photos (also needs the Tesseract binary)
+pip install "whispergram[describe]"      # optional: photo captions (BLIP, ~1.9 GB model)
+pip install "whispergram[describe-hq]"   # optional: best captions for photos + stickers + GIFs (Qwen2-VL, ~4.4 GB)
 ```
 
-**Or clone for development:**
+**Or as an isolated app with [pipx](https://pipx.pypa.io/)** — keeps its dependencies out of your global Python:
+
+```bash
+pipx install whispergram
+pipx install "whispergram[ocr,describe-hq]"   # with extras
+```
+
+With pipx, add any later packages (the Windows CUDA wheels, a CUDA build of torch) to its
+environment with `pipx inject whispergram <package>` instead of `pip install`.
+
+**Upgrade:**
+
+```bash
+pip install -U whispergram              # pipx: pipx upgrade whispergram
+```
+
+**Or clone and run from source** (development):
 
 ```bash
 git clone https://github.com/davidmalko87/whispergram.git
 cd whispergram
 pip install -r requirements.txt
+python whispergram.py --help           # same flags as whispergram
 ```
 
-You also need **ffmpeg** on your PATH:
+No separate **ffmpeg** install is needed: audio is decoded by PyAV, which `faster-whisper` installs
+with FFmpeg bundled. The [Tesseract](https://github.com/tesseract-ocr/tesseract) binary is needed only
+for `--ocr` (see [Ukrainian / Russian OCR](#ukrainian--russian-ocr)).
 
-```bash
-# Linux:  sudo apt install ffmpeg
-# macOS:  brew install ffmpeg
-# Windows: choco install ffmpeg   (or: winget install Gyan.FFmpeg)
-```
+> **Known issue (Python 3.12+):** PyAV 19, released after whispergram 1.6.1, breaks faster-whisper's
+> audio decoding, so every voice/video note comes out as `[transcription failed]`. Until a fixed
+> release ships, pin it with `pip install "av<19"` (pipx: `pipx inject whispergram "av<19"`). If a run
+> already hit this, delete `.whispergram_cache.json` in that export folder, because failures are cached too.
+
+> **Where files live:** there's no config file — everything is relative to the folder you run
+> `whispergram` in, or the export folder(s) you pass. Every export folder it processes gets a
+> `.whispergram_cache.json` resume cache (`--no-cache` skips it), picker runs included; a direct run
+> also writes `merged_chat.md` there (`--out` / `--out-dir` move the transcript), while the picker
+> writes `transcripts/<chat name>.md` under the folder it scanned unless you change its "Output
+> folder" answer. Model weights (Whisper large-v3 ~3 GB, plus any caption model) download once into
+> the Hugging Face cache, `~/.cache/huggingface/hub` (`%USERPROFILE%\.cache\huggingface\hub` on
+> Windows), which the `HF_HOME` environment variable relocates; no log file is written, and a clone
+> behaves the same.
 
 ### 2. Export your chat
 
@@ -119,9 +150,9 @@ Telegram **Desktop** → open the chat → ⋮ menu → **Export chat history**.
 | **Video messages** | ✅ | Round video notes — transcribed |
 | **Photos** | ✅ for captions / `--ocr` | Scene-captioned and/or OCR'd; without it, photos show as a plain `(photo)` |
 | **Videos** | optional, for `--video-files` | Regular videos — their audio is transcribed |
-| **Stickers** | for `--describe-hq` | `(sticker 😅)` comes from JSON; tick to let `--describe-hq` caption the image too |
-| **GIFs** | for `--describe-hq` | `(animation)` comes from JSON; tick to let `--describe-hq` caption it (multi-frame) |
-| **Files** | ⬜ not needed | Shown as `(file: report.pdf)` from the JSON metadata |
+| **Stickers** | for HQ captions (`[describe-hq]`) | `(sticker 😅)` comes from JSON; tick to let the HQ describer caption the image too |
+| **GIFs** | for HQ captions (`[describe-hq]`) | `(animation)` comes from JSON; tick to let the HQ describer caption it (multi-frame) |
+| **Files** | ⬜ not needed | Shown as `(file: report.pdf [not exported])` from the JSON metadata |
 
 > **⚠️ Drag the "Size limit" slider up.** It defaults to **8 MB**, and any file larger than that is
 > **not** downloaded — those messages come out as `[not exported]`. Voice notes are tiny, but video
@@ -173,17 +204,21 @@ Point whispergram at a **single conversation folder** (the one that contains `me
 **Just run `whispergram`** — in a terminal it **opens the interactive picker by default** (no flags to
 remember). Run it in a folder that holds your exports; it looks **recursively**, so a single chat
 folder, a parent folder full of `ChatExport_*`, or an Instagram `your_instagram_activity` root all
-work (scanning a real 260-thread inbox takes ~4 s):
+work (scanning a real 260-thread inbox takes ~4 s). In a folder with no exports below it there is no
+picker — it loads the Whisper model and then finds nothing to do — so `cd` to your exports first:
 
 ```bash
-whispergram            # or, without installing: python whispergram.py
+whispergram --help     # all flags
+whispergram            # in a terminal, in the folder holding your exports: opens the picker
 ```
+
+From a clone, use `python path/to/whispergram.py` in place of `whispergram` — the flags are identical.
 
 You get a picker like this:
 
 ```
 ==================================================
-  whispergram v1.4.0
+  whispergram v1.6.1
   Local, offline Telegram & Instagram transcriber
   by David Malko - github.com/davidmalko87/whispergram
 ==================================================
@@ -195,7 +230,7 @@ Found 3 chat(s):
     2  Instagram    30     8     2  2026-05-01..2026-06-20  Maria
     3  Telegram      4    98    12  2024-10-28..2025-04-10  Work
 
-  Which chats? (e.g. 1,3-5 or 'all') [all]:
+Which chats? (e.g. 1,3-5 or 'all') [all]:
 ```
 
 It lists every Telegram **and** Instagram chat it finds with platform, name, **date range** and
@@ -205,8 +240,14 @@ preset — **"Everything, best models"** is the recommended default (transcribe 
 photos/stickers/GIFs, OCR). That's the simplest way to "transcribe everything with the best models"
 without learning the flags below. (`--menu` still forces the picker, but you rarely need it.)
 
-**Skip the picker and transcribe directly** — this happens **automatically when there's no terminal**
-(a cron job or a pipe, so scripts never block), or on demand:
+> **Preset 1 expects a full install** — `pip install "whispergram[ocr,describe-hq]"` plus the Tesseract
+> binary. It always turns OCR on, so on a plain `pip install whispergram` it stops with
+> `OCR needs pytesseract + Pillow` (after loading the Whisper model). On a core install pick **2**
+> (voice & video only), or **3** (custom) and leave OCR at its default *no*.
+
+**Skip the picker and transcribe directly** — when you point it at a **single chat folder**, this
+happens **automatically when there's no terminal** (a cron job or a pipe, so scripts never block), or
+on demand:
 
 ```bash
 whispergram --no-menu                                           # bare direct run, with defaults
@@ -214,9 +255,14 @@ whispergram "path/to/ChatExport_2026-06-20" --ocr --lang uk     # any action fla
 whispergram "your_instagram_activity/messages/inbox/alex_17842…" --no-menu
 ```
 
-Passing any transcription flag (`--ocr`, `--lang`, `--describe-hq`, `--video-files`, …) is read as
-"I've already chosen — just run it," so the picker doesn't open. The result is `merged_chat.md` in the
-export folder (or use `--out` / `--out-dir`, below).
+Passing any transcription flag (`--ocr`, `--lang`, `--describe-hq`, `--video-files`, …) at a single
+chat folder is read as "I've already chosen — just run it," so the picker doesn't open. The result is
+`merged_chat.md` in the export folder (or use `--out` / `--out-dir`, below). Run in a terminal from a
+**parent** folder, though, and the picker opens even with flags: its preset replaces `--ocr`, `--video-files`,
+`--describe-hq` and `--no-describe`, its "Output folder" answer replaces `--out-dir` (and makes `--out`
+fail at the end with a "mutually exclusive" error), while settings such as `--lang`, `--model` and
+`--device` are kept. With no terminal, a parent folder exits with a hint instead — pass the chat
+folders themselves.
 
 **Best quality for Instagram** (lots of photos, Reels and GIFs) — install the HQ describer and it's
 used automatically:
@@ -224,7 +270,8 @@ used automatically:
 ```bash
 pip install -U "whispergram[describe-hq]"
 whispergram "your_instagram_activity/messages/inbox/alex_17842…" --out-dir "C:\merged"
-# voice notes → transcribed, photos/videos/GIFs → described, Reels → [shared reel/post …] markers
+# voice notes → transcribed, photos/GIFs → described, videos → (video) markers
+# (add --video-files to transcribe their audio), Reels → [shared reel/post …] markers
 ```
 
 ### Best quality (use your GPU)
@@ -264,8 +311,9 @@ files are skipped and it continues where it left off. A progress bar shows `done
 
 If two chats share a name, the second is saved as `Work (2).md` rather than overwriting the first,
 and a folder that fails (e.g. a corrupt export) is skipped so the rest of the queue still runs.
-`--no-cache` disables the cache; `--out FILE` sets a custom path for a single folder (it can't be
-combined with `--out-dir`).
+`--no-cache` disables the cache (a `[transcription failed]` result is cached too, so delete
+`.whispergram_cache.json` to retry those); `--out FILE` sets a custom path for a single folder (it
+can't be combined with `--out-dir`).
 
 ---
 
@@ -293,6 +341,7 @@ combined with `--out-dir`).
 | Round video note | `[time] sender (video-note 8s): <transcript>` |
 | Voice/video note **with caption** | `[time] sender (voice 12s): <transcript> \| caption: <text>` |
 | Voice/video not downloaded | `[time] sender (voice 12s): [not exported]` |
+| Other media not downloaded | `[time] sender (file: report.pdf [not exported]): caption` |
 | Sticker | `[time] sender (sticker 😅)` |
 | Photo, `--no-describe` | `[time] sender (photo): caption` (plain marker, no captioning) |
 | Animation / GIF | `[time] sender (animation)` |
@@ -304,7 +353,7 @@ combined with `--out-dir`).
 | Photo (default, `[describe]` installed) | `[time] sender (photo, described): a caption of the scene` |
 | Photo + `--ocr` | `[time] sender (photo, described): <scene> \| text: <text found in the image>` |
 | Photo + `--ocr --no-describe` | `[time] sender (photo, text): <text found in the image>` |
-| Sticker / GIF + `--describe-hq` | `[time] sender (sticker 😅, described): …` · `(animation, described): …` |
+| Sticker / GIF (HQ describer, `[describe-hq]`) | `[time] sender (sticker 😅, described): …` · `(animation, described): …` |
 | Reply (Telegram) | `[time] sender: message \| reply to <author>: "<snippet>"` |
 | Forwarded (Telegram) | `[time] forwarder (voice 42s): <transcript> \| forwarded from <original author>` |
 | Reactions (either platform) | `[time] sender: message \| reactions: 👍 x2 (Bob, Mia), ❤️ (Al)` |
@@ -326,8 +375,8 @@ flag needed:**
 | Mode | How to enable | What it captions | Model | Size | Speed |
 |---|---|---|---|---|---|
 | **Off** | `--no-describe` | nothing (media shown as markers) | — | — | instant |
-| **Light** | `pip install whispergram[describe]` | **photos** | BLIP-large | ~1.9 GB | fast on CPU |
-| **High-quality (auto)** | `pip install whispergram[describe-hq]` | **photos + stickers + GIFs** (GIFs multi-frame) | Qwen2-VL-2B | ~4.4 GB | slow on CPU / fast on GPU |
+| **Light** | `pip install "whispergram[describe]"` | **photos** | BLIP-large | ~1.9 GB | fast on CPU |
+| **High-quality (auto)** | `pip install "whispergram[describe-hq]"` | **photos + stickers + GIFs** (GIFs multi-frame) | Qwen2-VL-2B | ~4.4 GB | slow on CPU / fast on GPU |
 
 - Install the quality you want, then just run `whispergram`: if `[describe-hq]` is present it's used
   automatically (and captions **stickers + GIFs**); otherwise BLIP captions photos. `--describe-hq`
@@ -377,7 +426,7 @@ dropped media items — every sticker, photo, and caption-less item — leaving 
 round-trip is what surfaced it.)
 
 > Those exports are private, so the counts were measured locally and are not reproducible from this
-> repo. The synthetic export under [`tests/fixtures/`](tests/fixtures/) reproduces the same lossless
+> repo. The synthetic export under [`tests/fixtures/`](https://github.com/davidmalko87/whispergram/tree/master/tests/fixtures) reproduces the same lossless
 > mapping across every media type and guards it automatically in CI.
 
 ---
@@ -439,9 +488,9 @@ whispergram --out result.md                       # custom output path
 | `--ocr` | off | extract text from photos with local Tesseract OCR |
 | `--ocr-lang` | `eng` | Tesseract language(s), e.g. `ukr+rus+eng` |
 | `--no-describe` | off | skip photo scene captions (on by default when `[describe]` is installed) |
-| `--describe-model` | `blip-large` | BLIP caption model id; use `...-base` for faster/lighter |
-| `--describe-hq` | off | high-quality describer (Qwen2-VL) + captions stickers/GIFs; needs `[describe-hq]` |
-| `--offline` | off | use only cached models; make zero network calls |
+| `--describe-model` | `Salesforce/blip-image-captioning-large` | BLIP caption model id (full Hugging Face id); use `Salesforce/blip-image-captioning-base` for faster/lighter. Ignored when the HQ describer is in use |
+| `--describe-hq` | auto | force the high-quality describer (Qwen2-VL) + sticker/GIF captions; used automatically when `[describe-hq]` is installed |
+| `--offline` | off | use only cached models (download them once without it first); make zero network calls |
 | `--no-media-markers` | off | omit `(sticker)` / `(photo)` / `(file)` markers |
 | `--dry-run` | off | map the chat without loading a model or transcribing |
 | `--setup-cuda-windows` | — | copy CUDA DLLs next to ctranslate2, then exit (Windows GPU fix) |
@@ -450,7 +499,11 @@ whispergram --out result.md                       # custom output path
 
 ## GPU (CUDA) setup
 
-**Linux / macOS:** with a working CUDA install it runs as-is on `--device cuda`.
+**Linux:** with a working NVIDIA CUDA install it runs as-is on `--device cuda`.
+
+**macOS:** there is no CUDA, so Whisper runs on the CPU — the default `--device cuda` prints a
+`cuda failed (…); falling back to CPU` line and carries on. Pass `--device cpu --model large-v3-turbo`
+to skip that and go faster.
 
 **Windows** — the common pitfall is `RuntimeError: Library cublas64_12.dll is not found`:
 
@@ -461,7 +514,7 @@ whispergram --out result.md                       # custom output path
    ```
 2. If it *still* can't find the DLL, copy them next to CTranslate2 (the reliable fix):
    ```bash
-   python whispergram.py --setup-cuda-windows
+   whispergram --setup-cuda-windows     # from a clone: python whispergram.py --setup-cuda-windows
    ```
 3. Or skip the GPU entirely: `--device cpu --model large-v3-turbo`.
 
@@ -544,8 +597,9 @@ export folder. Every voice note is transcribed with Whisper and merged into the 
 Download your Instagram information (Accounts Center → *Download your information* → **Messages**,
 format **JSON**, media quality **High**), unzip it, and point whispergram at a single conversation
 folder under `messages/inbox/` (the one with `message_1.json`). It's auto-detected — **no flag** — and
-Instagram voice notes are transcribed **by default**. Photos/videos/GIFs are described (install
-`whispergram[describe-hq]` for the best captions), and shared Reels appear as link markers.
+Instagram voice notes are transcribed **by default**. Photos and GIFs are described (install
+`whispergram[describe-hq]` for GIFs and the best captions), regular videos get their audio
+transcribed with `--video-files`, and shared Reels appear as link markers.
 
 **Do I have to tell it which platform the export is?**
 No. whispergram detects Telegram vs Instagram from the folder's files (`result.json` with Telegram's
@@ -555,8 +609,9 @@ mixed `--menu` scan or a mixed queue.
 **Is it private / offline? Does my audio leave my machine?**
 Yes. Transcription, captioning and OCR run locally and need no account or API key. The tool makes no
 network calls **with your data** — your chat audio, photos and transcripts never leave your machine.
-The only network use is a **one-time download of the model weights** (public files) from Hugging
-Face; usage telemetry is **off by default**, and `--offline` forces cache-only with **zero** network
+The first run downloads the **model weights** (public files) from Hugging Face; later runs without
+`--offline` still send small metadata requests to Hugging Face to check for model updates (no chat
+data). Usage telemetry is **off by default**, and `--offline` forces cache-only with **zero** network
 calls once the models are downloaded.
 
 **Do I need a GPU?**
@@ -571,17 +626,18 @@ Yes — `--ocr` runs local Tesseract over photos and drops the extracted text in
 `(photo, text): ...` (ideal for screenshots).
 
 **Can it describe what's *in* a photo, not just the text?**
-Yes, and it's **automatic**: once you `pip install whispergram[describe]`, photos are captioned by a
+Yes, and it's **automatic**: once you `pip install "whispergram[describe]"`, photos are captioned by a
 small local model (BLIP via transformers — uses your GPU if you have one, else CPU)
 with no flag needed. It composes with `--ocr` to give both the scene and the in-image text. Captions
 are a short, English, best-effort gist. Pass `--no-describe` to turn it off, or `--describe-model
 Salesforce/blip-image-captioning-base` for a faster/lighter model. The BLIP-large model (~1.9 GB)
-downloads once on the first photo, then stays offline.
+downloads once on the first photo, then runs locally from the cache.
 
 **Can it describe stickers and GIFs too?**
-Yes, with `--describe-hq` (`pip install whispergram[describe-hq]`). That switches to a stronger model
-(Qwen2-VL) that's much better on cartoons and *actions*, and it reads GIFs **multi-frame** to catch
-the motion — e.g. `(animation, described): a character in a suit walking into an arena`. It's heavier
+Yes: `pip install "whispergram[describe-hq]"` and it's used automatically (`--describe-hq` only forces
+it). That switches to a stronger model (Qwen2-VL) that's much better on cartoons and *actions*, and
+it reads GIFs **multi-frame** to catch the motion — e.g.
+`(animation, described): a character in a suit walking into an arena`. It's heavier
 (~4.4 GB; slow on CPU, fast on GPU), and cartoon/meme captions are still best-effort, never exact.
 
 **Why is some Instagram text garbled in other tools but fine here?**
@@ -605,22 +661,25 @@ Instagram, which has no built-in transcription at all.
 ```
 whispergram/
 ├── whispergram.py             # The tool: text reconstruction, mapping, transcription, CLI
-├── requirements.txt           # Runtime dependency (faster-whisper)
+├── requirements.txt           # Runtime deps for a clone (faster-whisper, tqdm)
 ├── pyproject.toml             # Packaging + ruff + pytest configuration
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 ├── LICENSE
 ├── README.md
+├── .gitignore                 # keeps exports, audio and transcripts out of git
 │
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml             # ruff + pytest on Python 3.9–3.13 (no transcription deps)
 │   │   └── publish.yml        # tag v* → verify version → build → PyPI (trusted publishing)
 │   ├── ISSUE_TEMPLATE/
+│   ├── PULL_REQUEST_TEMPLATE.md
 │   └── dependabot.yml
 │
 └── tests/
-    ├── test_whispergram.py    # 132 offline tests — no model download or GPU required
+    ├── __init__.py
+    ├── test_whispergram.py    # 135 offline tests — no model download or GPU required
     └── fixtures/
         └── sample_export/
             └── result.json    # synthetic export (safe to commit; used by tests + CI)
@@ -634,14 +693,16 @@ This tool processes **private conversations**, and the transcripts it produces a
 sensitive as the audio. Two rules:
 
 - **Nothing leaves your machine.** Transcription, captioning and OCR are fully local; the tool makes
-  no network calls with your data and needs no credentials. The only network use is a one-time
-  download of public model weights from Hugging Face — telemetry is off by default, and `--offline`
-  guarantees zero network calls once the models are cached.
+  no network calls with your data and needs no credentials. The only network use is downloading
+  public model weights from Hugging Face (once) plus small model-update metadata checks on later
+  runs — telemetry is off by default, and `--offline` guarantees zero network calls once the models
+  are cached.
 - **Never commit your exports or transcripts.** The included `.gitignore` blocks chat data by default
   — Telegram (`result.json`, `ChatExport_*/`), Instagram (`your_instagram_activity/`), all audio and
-  media (including `round_video_messages/` and `*_thumb.jpg`), and every `merged_chat.md`. Keep it.
-  Build your repo in a folder **separate** from any export, keep any `--out` path **inside** the
-  export folder, and run `git status` before pushing to confirm only code is staged. The only data
+  media (including `round_video_messages/` and `*_thumb.jpg`), every `merged_chat.md`, and the
+  picker's `transcripts/` folder. Keep it. Build your repo in a folder **separate** from any export,
+  keep any `--out` / `--out-dir` path **inside** the export folder (other locations aren't covered by
+  the `.gitignore`), and run `git status` before pushing to confirm only code is staged. The only data
   file in this repo is the synthetic fixture under `tests/fixtures/`.
 
 ---
@@ -649,12 +710,11 @@ sensitive as the audio. Two rules:
 ## Requirements
 
 - Python **3.9+**
-- [ffmpeg](https://ffmpeg.org/) on your PATH
-- [`faster-whisper`](https://pypi.org/project/faster-whisper/) >= 1.0 (`pip install -r requirements.txt`)
+- [`faster-whisper`](https://pypi.org/project/faster-whisper/) >= 1.0 and `tqdm` — installed automatically by `pip install whispergram` (from a clone: `pip install -r requirements.txt`). No system ffmpeg is needed; faster-whisper decodes audio with PyAV's bundled FFmpeg
 - For NVIDIA GPU on Windows: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `ctranslate2>=4.5`
-- For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install whispergram[ocr]`
-- For photo descriptions (optional): `pip install whispergram[describe]` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1.9 GB BLIP-large model downloads once on the first photo, then runs offline. Use `--describe-model Salesforce/blip-image-captioning-base` for a lighter model, or `--no-describe` to turn it off
-- For high-quality captions + sticker/GIF describe (optional): `pip install whispergram[describe-hq]` (adds `torchvision`) and pass `--describe-hq`. Uses Qwen2-VL (~4.4 GB, slow on CPU / fast on GPU)
+- For `--ocr` (optional): the [Tesseract](https://github.com/tesseract-ocr/tesseract) binary on your PATH (with language packs, e.g. `ukr`, `rus`) plus `pip install "whispergram[ocr]"`
+- For photo descriptions (optional): `pip install "whispergram[describe]"` (transformers + torch — prebuilt wheels, no compiler; uses your GPU if present). Captioning is then automatic; the ~1.9 GB BLIP-large model downloads once on the first photo, then runs locally from the cache. Use `--describe-model Salesforce/blip-image-captioning-base` for a lighter model, or `--no-describe` to turn it off
+- For high-quality captions + sticker/GIF describe (optional): `pip install "whispergram[describe-hq]"` (adds `torchvision`); it's then used automatically (`--describe-hq` only forces it). Uses Qwen2-VL (~4.4 GB, slow on CPU / fast on GPU)
 
 > The test suite needs none of the above — only `ruff` and `pytest`.
 
@@ -662,13 +722,13 @@ sensitive as the audio. Two rules:
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+See [CHANGELOG.md](https://github.com/davidmalko87/whispergram/blob/master/CHANGELOG.md) for the full version history.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the privacy rule, and the
+See [CONTRIBUTING.md](https://github.com/davidmalko87/whispergram/blob/master/CONTRIBUTING.md) for the development setup, the privacy rule, and the
 versioning / release policy.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/davidmalko87/whispergram/blob/master/LICENSE)

@@ -27,6 +27,10 @@ keywords = [
     "image-captioning",
     "screenshot",
     "offline",
+    "privacy",
+    "voice-notes",
+    "llm",
+    "cli",
 ]
 dependencies = [
     "faster-whisper>=1.0",
